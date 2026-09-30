@@ -1,0 +1,29 @@
+# === Gate 0: secrets & private data — NEVER commit ===
+.env
+.env.*
+*.pem
+*.key
+*secret*
+*credential*
+config/production.*
+
+# Real holdings / account data — NEVER commit
+*holding*
+*position*
+*portfolio*
+
+# Databases
+*.db
+*.sqlite*
+*.sqlite-wal
+*.sqlite-shm
+
+# Raw data exports
+*.csv
+
+# Logs
+*.log
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
