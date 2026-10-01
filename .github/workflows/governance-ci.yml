@@ -1,0 +1,40 @@
+name: Governance CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Basic structure check
+        run: |
+          test -d docs || (echo "missing docs/" && exit 1)
+          test -f README.md || (echo "missing README.md" && exit 1)
+          test -f TASK_STATUS.md || (echo "missing TASK_STATUS.md" && exit 1)
+          echo "basic structure OK"
+
+      - name: Python environment check
+        run: |
+          python3 --version
+          echo "python OK"
+
+      - name: Governance files check
+        run: |
+          test -d docs/governance || (echo "missing docs/governance/" && exit 1)
+          test -f docs/governance/CODEX_CLOUD_TRUST_BOUNDARY.md || (echo "missing CODEX_CLOUD_TRUST_BOUNDARY.md" && exit 1)
+          echo "governance files OK"
+
+      - name: Secret file scan
+        run: |
+          VIOLATIONS=$(git ls-files | grep -E '(\.env$|\.pem$|\.key$|credentials\.json$|aws_access_key)' || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "forbidden files detected:"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "secret scan OK"
