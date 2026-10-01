@@ -1,8 +1,4 @@
-"""Provider contract foundation.
-
-This package contains contracts only.  It deliberately contains no data-source
-client or transport implementation.
-"""
+"""Provider contracts and approved provider adapters."""
 
 from .contract import (
     ContractError,
@@ -12,6 +8,7 @@ from .contract import (
     ProviderStatus,
 )
 from .interface import Provider
+from .tushare import TushareMCPProvider
 from .validation import validate_contract
 
 __all__ = [
@@ -21,5 +18,6 @@ __all__ = [
     "Provider",
     "ProviderEnvelope",
     "ProviderStatus",
+    "TushareMCPProvider",
     "validate_contract",
 ]
