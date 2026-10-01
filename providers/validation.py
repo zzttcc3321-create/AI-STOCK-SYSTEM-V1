@@ -31,7 +31,10 @@ REQUIRED_ENVELOPE_FIELDS = frozenset(
 # V1.0.  TUSHARE_PROVIDER is accepted as the interface-level name used by the
 # task card, but it has exactly the same (historical-only) scope.
 PROVIDER_DATA_KIND_SCOPES: Mapping[str, frozenset[str]] = {
-    "TUSHARE_MCP": frozenset({"daily_kline"}),
+    # ``historical_daily`` is the capability name used by the frozen provider
+    # responsibility matrix.  ``daily_kline`` remains accepted for backwards
+    # compatibility with the request vocabulary established in P4.1.
+    "TUSHARE_MCP": frozenset({"daily_kline", "historical_daily"}),
     "TUSHARE_PROVIDER": frozenset({"daily_kline"}),
     "TDX_OFFICIAL_LOCAL_HTTP": frozenset({"realtime_quote"}),
     "WORKBUDDY_TDX_MCP": frozenset(
