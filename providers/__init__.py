@@ -9,6 +9,7 @@ from .contract import (
 )
 from .interface import Provider
 from .tushare import TushareMCPProvider
+from .tdx_realtime import TdxLocalHttpProvider
 from .validation import validate_contract
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "ProviderEnvelope",
     "ProviderStatus",
     "TushareMCPProvider",
+    "TdxLocalHttpProvider",
     "validate_contract",
 ]
