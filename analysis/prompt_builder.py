@@ -60,6 +60,8 @@ class PromptBuilder:
         # block remains visible and traceable despite the fixed seven keys.
         return {
             "stock_id": value["stock_id"],
+            # Retain explicit portfolio_positions provenance, separate from
+            # the Provider Evidence supporting market/financial/information data.
             "holding_position": value["holding_snapshot"],
             "canonical_market_data": {
                 "stock_identity": value["stock_identity"],

@@ -60,8 +60,6 @@ def package_arguments(*, quote=False, holding=False):
         value["holding_snapshot"] = {"stock_id": STOCK, "quantity": 100.0,
                                      "cost_price": 10.0, "snapshot_time": REQUEST_TIME,
                                      "profit_loss": None, "profit_loss_pct": None}
-        value["evidence_links"]["holding_snapshot"] = ["EV-HOLDING"]
-        value["evidence_metadata"].append(metadata("EV-HOLDING", "WORKBUDDY_TDX_MCP"))
     return value
 
 
@@ -238,12 +236,26 @@ class AnalysisPackageTests(unittest.TestCase):
         self.assertIn("holding_snapshot.cost_price", package.data_quality["missing_fields"])
         self.assertFalse(package.data_quality["complete_analysis_input"])
 
-    def test_absent_holding_evidence_excludes_snapshot_without_switching_to_watch(self):
+    def test_absent_holding_evidence_preserves_snapshot_without_switching_to_watch(self):
         arguments = package_arguments(holding=True)
-        arguments["evidence_links"].pop("holding_snapshot")
         package = self.build(arguments)
-        self.assertEqual(package.holding_snapshot["records"], ())
+        self.assertEqual(package.holding_snapshot["records"][0]["data"], arguments["holding_snapshot"])
         self.assertEqual(package.position_mode, "HOLDING_ANALYSIS")
+
+    def test_three_source_evidence_cannot_claim_holding_quantity_or_cost(self):
+        for source in ("TUSHARE_MCP", "TDX_OFFICIAL_LOCAL_HTTP", "WORKBUDDY_TDX_MCP"):
+            arguments = package_arguments(holding=True)
+            arguments["evidence_metadata"].append(metadata("EV-HOLDING", source))
+            arguments["evidence_links"]["holding_snapshot"] = ["EV-HOLDING"]
+            with self.subTest(source=source), self.assertRaisesRegex(
+                    AnalysisInputError, "holding_snapshot cannot reference Provider Evidence"):
+                self.build(arguments)
+        for field, value in (("provider", "WORKBUDDY_TDX_MCP"),
+                             ("source", "TUSHARE_MCP"), ("evidence_ids", ["EV-DAILY"])):
+            arguments = package_arguments(holding=True)
+            arguments["holding_snapshot"][field] = value
+            with self.subTest(field=field), self.assertRaises(AnalysisInputError):
+                self.build(arguments)
 
     def test_information_absence_and_not_available_are_explicit(self):
         arguments = package_arguments()

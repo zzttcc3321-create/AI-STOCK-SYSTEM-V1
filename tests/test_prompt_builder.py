@@ -13,7 +13,7 @@ from unittest.mock import patch
 from analysis import AnalysisInputError, AnalysisPackage, AnalysisPackageBuilder, PromptBuilder
 from analysis.contracts import stable_json
 from analysis.prompt_builder import PROMPT_VERSION, TEMPLATE_PATH, TEMPLATE_SHA256
-from test_analysis_package import package_arguments
+from test_analysis_package import metadata, package_arguments
 
 
 class PromptBuilderTests(unittest.TestCase):
@@ -55,12 +55,62 @@ class PromptBuilderTests(unittest.TestCase):
 
     def test_missing_holding_evidence_does_not_become_watch(self):
         arguments = package_arguments(holding=True)
-        arguments["evidence_links"].pop("holding_snapshot")
         package = AnalysisPackageBuilder().build(**arguments)
         envelope = self.builder.build(package)
         self.assertEqual(envelope.position_mode, "HOLDING_ANALYSIS")
-        self.assertEqual(self.builder.inputs(package)["holding_position"]["records"], [])
-        self.assertIn("holding_snapshot.evidence", envelope.user_prompt)
+        self.assertEqual(self.builder.inputs(package)["holding_position"]["records"][0]["data"],
+                         arguments["holding_snapshot"])
+        self.assertNotIn("holding_snapshot.evidence", envelope.user_prompt)
+
+    def test_holding_enters_prompt_without_any_provider_evidence(self):
+        arguments = package_arguments(holding=True)
+        arguments["evidence_metadata"] = []
+        package = AnalysisPackageBuilder().build(**arguments)
+        envelope = self.builder.build(package)
+        inputs = json.loads(envelope.user_prompt.split("\n", 2)[1])
+        self.assertEqual(inputs["holding_position"]["records"][0]["data"], arguments["holding_snapshot"])
+        self.assertEqual(envelope.analysis_mode, "HOLDING_ANALYSIS")
+        self.assertEqual(inputs["evidence_index"], [])
+        self.assertEqual(envelope.evidence_ids, ())
+        self.assertEqual(inputs["canonical_market_data"]["daily_kline"]["records"], [])
+        self.assertNotIn("holding_snapshot.evidence", inputs["data_quality_report"]["missing_fields"])
+
+    def test_holding_without_provider_evidence_keeps_market_evidence_gate(self):
+        arguments = package_arguments(holding=True, quote=True)
+        for missing_market_evidence in (False, True):
+            if missing_market_evidence:
+                arguments["evidence_links"].pop("daily_kline.0")
+                arguments["evidence_links"].pop("market_quotes.0")
+            package = AnalysisPackageBuilder().build(**arguments)
+            envelope = self.builder.build(package)
+            inputs = self.builder.inputs(package)
+            with self.subTest(missing_market_evidence=missing_market_evidence):
+                self.assertEqual(envelope.position_mode, "HOLDING_ANALYSIS")
+                self.assertEqual(envelope.analysis_mode, "HOLDING_ANALYSIS")
+                self.assertEqual(inputs["holding_position"]["records"][0]["data"], arguments["holding_snapshot"])
+                for kind, identifier in (("daily_kline", "EV-DAILY"), ("market_quotes", "EV-QUOTE")):
+                    records = inputs["canonical_market_data"][kind]["records"]
+                    if missing_market_evidence:
+                        self.assertEqual(records, [])
+                        self.assertIn(f"{kind}.0.evidence", inputs["data_quality_report"]["missing_fields"])
+                    else:
+                        self.assertEqual(records[0]["evidence_ids"], [identifier])
+                        self.assertIn(identifier, envelope.evidence_ids)
+
+    def test_prompt_distinguishes_portfolio_input_from_market_evidence_sources(self):
+        arguments = package_arguments(holding=True, quote=True)
+        arguments["evidence_metadata"].append(metadata("EV-UNUSED", "WORKBUDDY_TDX_MCP"))
+        envelope = self.builder.build(AnalysisPackageBuilder().build(**arguments))
+        inputs = json.loads(envelope.user_prompt.split("\n", 2)[1])
+        holding = inputs["holding_position"]["records"][0]
+        self.assertEqual(set(holding), {"data", "input_source"})
+        self.assertEqual(holding["input_source"], "portfolio_positions")
+        self.assertEqual(holding["data"], arguments["holding_snapshot"])
+        self.assertEqual({item["source"] for item in inputs["evidence_index"]},
+                         {"TUSHARE_MCP", "TDX_OFFICIAL_LOCAL_HTTP"})
+        self.assertEqual(envelope.evidence_ids, ("EV-DAILY", "EV-QUOTE"))
+        for source in ("TUSHARE_MCP", "TDX_OFFICIAL_LOCAL_HTTP", "WORKBUDDY_TDX_MCP"):
+            self.assertNotIn(source, json.dumps(inputs["holding_position"]))
 
     def test_realtime_missing_with_explicit_frozen_prohibition(self):
         envelope = self.builder.build(self.package)

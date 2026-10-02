@@ -186,8 +186,9 @@ class AnalysisPackageBuilder:
 
     Information fields accept availability declarations only until #008 defines
     their canonical contracts. ``evidence_links`` addresses every record by
-    ``daily_kline.N`` / ``market_quotes.N`` and each snapshot by its field name.
-    No store or Provider object is accepted or called.
+    ``daily_kline.N`` / ``market_quotes.N`` and identity by ``stock_identity``.
+    Holdings are explicit portfolio_positions business input, without Provider
+    Evidence. No store or Provider object is accepted or called.
     """
 
     def build(
@@ -220,6 +221,8 @@ class AnalysisPackageBuilder:
         sources = {source: sources.get(source, "MISSING") for source in sorted(SOURCES)}
         fallback = _fallback(fallback_used)
         links = _mapping(evidence_links if evidence_links is not None else {}, "evidence_links")
+        if "holding_snapshot" in links:
+            raise AnalysisInputError("holding_snapshot cannot reference Provider Evidence")
         evidence = _evidence_index(evidence_metadata)
         used, addressed = set(), set()
         missing = _text_set(missing_fields, "missing_fields")
@@ -263,8 +266,9 @@ class AnalysisPackageBuilder:
                 if holding[name] is None:
                     missing.add(f"holding_snapshot.{name}")
                     incomplete.append(f"holding_snapshot.{name}: missing snapshot value")
-            holding_entry = attach(holding, "holding_snapshot")
-            holding_block = _block([holding_entry] if holding_entry else [], reason=None if holding_entry else "Evidence unavailable")
+            # Business input provenance is distinct from the three external
+            # Evidence sources; never use Provider Evidence for quantity/cost.
+            holding_block = _block([{"data": holding, "input_source": "portfolio_positions"}])
 
         blocks = {}
         for kind in ("daily_kline", "market_quotes"):
