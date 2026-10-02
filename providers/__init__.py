@@ -10,6 +10,7 @@ from .contract import (
 from .interface import Provider
 from .tushare import TushareMCPProvider
 from .tdx_realtime import TdxLocalHttpProvider
+from .tdx_information import TdxInformationProvider
 from .validation import validate_contract
 
 __all__ = [
