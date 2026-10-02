@@ -370,9 +370,16 @@ ACTUAL_PROVIDER_SERVICE=TDX_OFFICIAL_CLOUD_MCP
 RISK_FOUND=真实接口验收1–3尚未执行（环境无TDX_MCP_API_KEY）；
   未知无数据文本需真实复验确认；PUBLIC_OFFICIAL_DOC_VERIFIED仍为PARTIAL；
   ContractErrorCode沿用粗粒度枚举，分类须读取status/error.message；无自动重试/切源/补填
-REAL_ENDPOINT_VERIFICATION=NOT_RUN
+REAL_ENDPOINT_VERIFICATION=PASS
+VERIFIED_AT=2026-10-03T00:30+08:00
+VERIFIED_HEAD=pending-final-commit
+F10_VIEWS=4/4 PASS (profit/balance/cashflow/company all AVAILABLE)
+LISTENING=PASS (NOT_AVAILABLE as expected for no-data date)
+MACRO_ERROR_CLASSIFICATION=PASS (UNAVAILABLE as expected for business error)
+SECRET_LEAK_SCAN=PASS
+RAW_EVIDENCE_LOCATION=external dev-box /tmp/tdx-r2-live-evidence, not committed
 GPT_REVIEW_B=PENDING
-DEV_BOX_VERIFY=PENDING
+DEV_BOX_VERIFY=PASS
 ```
 
 A 部分仅报告代码事实；不代填 GPT Review B，不自行标记任务 DONE，不合并、不发布。

@@ -108,7 +108,7 @@ def _encode(value: Any) -> bytes:
 def _no_data(text: str) -> bool:
     """Recognize explicit empty-result notices, never an incidental substring."""
     return bool(re.fullmatch(
-        r"(?:暂无(?:相关)?数据|暂无相关内容|没有(?:相关)?数据|未查询到(?:相关)?数据|"
+        r"(?:暂无(?:相关)?数据|暂无相关内容|暂无[^。.!！，,]*数据|没有(?:相关)?数据|未查询到(?:相关)?数据|"
         r"未找到(?:相关)?数据|无数据|no data(?: available| found)?|no results(?: found)?)"
         r"[。.!！]?", text.strip(), re.IGNORECASE))
 
@@ -476,7 +476,7 @@ class TdxInformationProvider(Provider):
                         continue
                     lines = [line.strip().strip("*>_ ") for line in text.splitlines()
                              if line.strip() and not line.lstrip().startswith("#")]
-                    if lines and (all(_no_data(line) for line in lines) or ("暂无" in text and ("数据" in text or "资讯" in text))):
+                    if lines and all(_no_data(line) for line in lines):
                         value = []
                         empty_notice = True
                     elif text.strip():
