@@ -445,7 +445,7 @@ class TdxInformationProvider(Provider):
             raise _Failure(ProviderStatus.VALIDATION_FAILED)
         _business_error(result)
         empty_notice = False
-        if "structuredContent" in result:
+        if "structuredContent" in result and ("data" in result["structuredContent"] or "response" in result["structuredContent"]):
             data = _business_data(result["structuredContent"])
         elif "data" in result or "response" in result:
             data = _business_data(result)
@@ -465,6 +465,8 @@ class TdxInformationProvider(Provider):
                 try:
                     value = _json(text)
                 except json.JSONDecodeError:
+                    if "[MCP App" in text:
+                        continue  # MCP App metadata is evidence, not business data.
                     if text.lstrip().startswith(("{", "[")):
                         raise _Failure(ProviderStatus.VALIDATION_FAILED) from None
                     if tool != "tdx_ai_listening":
@@ -474,7 +476,7 @@ class TdxInformationProvider(Provider):
                         continue
                     lines = [line.strip().strip("*>_ ") for line in text.splitlines()
                              if line.strip() and not line.lstrip().startswith("#")]
-                    if lines and all(_no_data(line) for line in lines):
+                    if lines and (all(_no_data(line) for line in lines) or ("暂无" in text and ("数据" in text or "资讯" in text))):
                         value = []
                         empty_notice = True
                     elif text.strip():
