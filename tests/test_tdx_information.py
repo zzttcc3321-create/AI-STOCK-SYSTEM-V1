@@ -423,7 +423,7 @@ class ProviderTests(unittest.TestCase):
     def test_nonzero_business_code_only_raw_no_canonical(self):
         self.transport.result = {"structuredContent": {"code": 7, "data": ROWS}}
         result = self.provider.fetch(query())
-        self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
         self.assertEqual(result.payload["data"], [])
         self.assertEqual(result.payload["canonical_data"], [])
         self.assertIn(b'"code": 7', result.payload["evidence"][-1]["raw_bytes"])
@@ -538,10 +538,10 @@ class ProviderTests(unittest.TestCase):
                 return MCPResponse(200, {}, encode({"jsonrpc": "2.0", "id": rpc["id"],
                                                     "error": {"code": -32603, "message": "mock"}}))
         self.transport.hook = error
-        self.assertEqual(self.provider.fetch(query()).status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(self.provider.fetch(query()).status, ProviderStatus.UNAVAILABLE)
         self.transport.hook = None
         self.transport.result = {"isError": True, "structuredContent": {"code": 0, "data": ROWS}}
-        self.assertEqual(self.provider.fetch(query()).status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(self.provider.fetch(query()).status, ProviderStatus.UNAVAILABLE)
 
     def test_session_expiration_reinitializes_exactly_once(self):
         expired = [False]
@@ -735,7 +735,7 @@ class ProviderTests(unittest.TestCase):
     def test_outer_business_error_cannot_hide_in_success_structured_content(self):
         self.transport.result = {"code": 1, "structuredContent": {"code": 0, "data": ROWS}}
         result = self.provider.fetch(query())
-        self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
         self.assertEqual(result.payload["data"], [])
 
     def test_empty_http_body_still_has_raw_hash_and_failed_validation(self):
@@ -751,6 +751,267 @@ class ProviderTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "timeout"):
                 TdxInformationProvider(self.transport, evidence_root=self.root,
                                        environ=TEST_ENV, timeout=value)
+
+
+class ResponseNormalizationTests(unittest.TestCase):
+    """R2 shapes from the task card; synthetic fixtures, not live captures."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.transport = MockTransport()
+
+    def fetch_result(self, response, tool="tdx_ai_listening", **changes):
+        self.transport.result = response
+        self.provider = TdxInformationProvider(self.transport, evidence_root=self.root,
+                                               environ=TEST_ENV, clock=Clock())
+        result = self.provider.fetch(query(tool, **changes))
+        for entry in result.payload["evidence"]:
+            record, raw = entry["record"], entry["raw_bytes"]
+            self.assertEqual(Path(record["raw_response_path"]).read_bytes(), raw)
+            self.assertEqual(record["raw_response_hash"], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(json.loads(Path(record["raw_response_path"]).with_suffix(
+                ".evidence.json").read_bytes())["record"], record)
+            self.assertNotIn(b"TEST_KEY_ONLY", raw)
+        self.assertEqual(result.payload["canonical_data"], [])
+        self.assertTrue(self.provider.validate_contract(result).valid)
+        self.assertNotIn("TEST_KEY_ONLY", str(result))
+        return result
+
+    def test_f10_response_alias_all_views_and_envelope_locations(self):
+        for view in ("profit", "balance", "cashflow", "company"):
+            for data in (ROWS, {"columns": ["MOCK"], "rows": [[1]]}):
+                business = {"ok": True, "response": data}
+                for response in (business, {"structuredContent": business},
+                                 {"content": [{"type": "text", "text": json.dumps(business)}]}):
+                    with self.subTest(view=view, response=response):
+                        result = self.fetch_result(response, "tdx_api_data", arguments={"view": view})
+                        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+                        self.assertEqual(result.payload["data"], data)
+
+    def test_f10_response_alias_legal_empty_all_views(self):
+        for view in ("profit", "balance", "cashflow", "company"):
+            for data in (None, [], {}):
+                with self.subTest(view=view, data=data):
+                    result = self.fetch_result({"structuredContent": {"ok": True, "response": data}},
+                                               "tdx_api_data", arguments={"view": view})
+                    self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+                    self.assertFalse(result.payload["data"])
+
+    def test_response_alias_has_same_precedence_and_validation_as_data(self):
+        for field in ("data", "response"):
+            for value in ("unexpected scalar", 7, True):
+                with self.subTest(field=field, value=value):
+                    result = self.fetch_result({"structuredContent": {field: value}}, "tdx_api_data")
+                    self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+
+    def test_conflicting_aliases_fail_closed_equal_aliases_succeed(self):
+        result = self.fetch_result({"structuredContent": {"data": ROWS, "response": []}})
+        self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(result.payload["data"], [])
+        result = self.fetch_result({"structuredContent": {"data": ROWS, "response": ROWS}})
+        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(result.payload["data"], ROWS)
+
+    def test_listening_markdown_and_app_metadata_in_either_order(self):
+        body = {"type": "text", "text": "# MOCK 24h 聆听\n\nMOCK 公司资讯正文。"}
+        metadata = {"type": "resource", "resource": {
+            "uri": "ui://mock/listening", "mimeType": "text/html", "text": "MOCK APP"}}
+        for content in ([body, metadata], [metadata, body]):
+            with self.subTest(content=content):
+                result = self.fetch_result({"content": content})
+                self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+                self.assertEqual(result.payload["data"], [body])
+                self.assertEqual(json.loads(result.payload["evidence"][-1]["raw_bytes"])["result"],
+                                 {"content": content})
+
+    def test_listening_empty_markdown_with_app_metadata_is_not_available(self):
+        for text in ("暂无数据", "# MOCK 24h 聆听\n\n**暂无数据。**",
+                     "# MOCK 24h 聆听\n\n> 暂无数据。", "No data available."):
+            with self.subTest(text=text):
+                result = self.fetch_result({"content": [
+                    {"type": "text", "text": text},
+                    {"type": "text", "text": json.dumps({"app": {"uri": "ui://mock/listening"}})}]})
+                self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+                self.assertEqual(result.payload["data"], [])
+
+    def test_listening_incidental_no_data_phrase_is_not_empty(self):
+        body = {"type": "text", "text": "# MOCK 资讯\n文章提及暂无数据，但包含实际资讯内容。"}
+        result = self.fetch_result({"content": [body]})
+        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(result.payload["data"], [body])
+
+    def test_text_app_metadata_stays_raw_only(self):
+        body = {"type": "text", "text": "MOCK business markdown"}
+        metadata = {"type": "text", "text": "MOCK App metadata", "_meta": {"ui": "MOCK"}}
+        result = self.fetch_result({"content": [body, metadata]})
+        self.assertEqual(result.payload["data"], [body])
+        self.assertIn(b"MOCK App metadata", result.payload["evidence"][-1]["raw_bytes"])
+
+    def test_multi_json_business_content_and_unknown_entries(self):
+        content = [{"type": "image", "data": "MOCK", "mimeType": "image/png"},
+                   {"type": "text", "text": json.dumps({"code": 0, "data": ROWS})},
+                   {"type": "future_kind", "vendor": {"unknown": True}},
+                   {"type": "text", "text": "MOCK unrecognized metadata"},
+                   {"type": "text", "text": json.dumps({"response": [{"title": "MOCK 2"}]})}]
+        result = self.fetch_result({"content": content}, "wenda_report_query")
+        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(result.payload["data"], ROWS + [{"title": "MOCK 2"}])
+        self.assertEqual(json.loads(result.payload["evidence"][-1]["raw_bytes"])["result"]["content"], content)
+
+    def test_multiple_dict_business_payloads_keep_each_source_object(self):
+        content = [{"type": "text", "text": json.dumps({"data": {"name": "MOCK 1"}})},
+                   {"type": "text", "text": json.dumps({"response": {"name": "MOCK 2"}})}]
+        result = self.fetch_result({"content": content}, "tdx_api_data")
+        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(result.payload["data"], [{"name": "MOCK 1"}, {"name": "MOCK 2"}])
+
+    def test_structured_content_remains_authoritative_and_unknown_items_retained(self):
+        response = {"structuredContent": {"response": ROWS},
+                    "content": [{"type": "future_kind", "vendor": "MOCK"}]}
+        result = self.fetch_result(response, "tdx_api_data")
+        self.assertEqual(result.payload["data"], ROWS)
+        self.assertEqual(json.loads(result.payload["evidence"][-1]["raw_bytes"])["result"], response)
+
+    def test_unknown_only_content_is_not_fabricated_business_data(self):
+        for content in ([{"type": "future_kind", "vendor": "MOCK"}],
+                        [{"type": "text", "text": '{"app":"MOCK"}'}]):
+            with self.subTest(content=content):
+                result = self.fetch_result({"content": content})
+                self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+                self.assertEqual(result.payload["data"], [])
+                self.assertTrue(result.payload["evidence"])
+
+    def test_malformed_content_cannot_hide_behind_valid_entry(self):
+        valid = {"type": "text", "text": json.dumps({"data": ROWS})}
+        for invalid in (None, {}, {"type": "text"}, {"type": "text", "text": 1},
+                        {"type": "text", "text": '{"data":BROKEN}'},
+                        {"type": "text", "text": '{"data":[],"data":[1]}'},
+                        {"type": "text", "text": 'NaN'}):
+            with self.subTest(invalid=invalid):
+                result = self.fetch_result({"content": [valid, invalid]})
+                self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+                self.assertEqual(result.payload["data"], [])
+
+    def test_ok_false_no_data_classified_in_outer_structured_and_text_envelopes(self):
+        for field in ("message", "msg", "error"):
+            business = {"ok": False, field: "暂无数据", "data": ROWS}
+            for response in (business, {"structuredContent": business},
+                             {"content": [{"type": "text", "text": json.dumps(business)}]}):
+                with self.subTest(field=field, response=response):
+                    result = self.fetch_result(response)
+                    self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+                    self.assertEqual(result.payload["data"], [])
+                    self.assertIn("no data", result.error.message)
+
+    def test_nested_business_error_message_no_data(self):
+        result = self.fetch_result({"structuredContent": {
+            "ok": False, "error": {"message": "暂无数据"}}})
+        self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+
+    def test_macro_server_date_error_distinct_from_local_request_error(self):
+        arguments = {"query": "GDP|bad-date|20241231||"}
+        result = self.fetch_result({"content": [{"type": "text", "text": json.dumps({
+            "ok": False, "error": "日期格式错误", "response": ROWS})}]},
+            "wenda_macro_query", arguments=arguments)
+        self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
+        self.assertIn("business error", result.error.message)
+        self.assertEqual(result.payload["data"], [])
+        self.assertEqual(self.transport.calls[-1][0]["params"]["arguments"], arguments)
+        count = len(self.transport.calls)
+        rejected = self.provider.fetch(query("wenda_macro_query", arguments={"query": "GDP|bad-date"}))
+        self.assertEqual(rejected.status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(len(self.transport.calls), count)
+        self.assertEqual(rejected.payload["evidence"], [])
+
+    def test_ok_false_unknown_failure_is_server_error_no_message_echo(self):
+        for message in ("日期格式错误", "服务端拒绝", "内部异常", "MOCK unexpected failure"):
+            with self.subTest(message=message):
+                result = self.fetch_result({"structuredContent": {"ok": False, "message": message}})
+                self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
+                self.assertIn("business error", result.error.message)
+                self.assertNotIn(message, result.error.message)
+
+    def test_outer_ok_false_cannot_be_hidden_by_success_data(self):
+        result = self.fetch_result({"ok": False, "message": "服务端拒绝",
+                                    "structuredContent": {"data": ROWS}})
+        self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
+        self.assertEqual(result.payload["data"], [])
+
+    def test_later_business_error_cannot_be_hidden_by_earlier_success(self):
+        result = self.fetch_result({"content": [
+            {"type": "text", "text": json.dumps({"data": ROWS})},
+            {"type": "text", "text": json.dumps({"ok": False, "message": "服务端拒绝"})}]})
+        self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
+        self.assertEqual(result.payload["data"], [])
+
+    def test_invalid_boolean_and_code_shapes_remain_validation_failures(self):
+        for business in ({"ok": "false"}, {"ok": 0}, {"isError": "false"},
+                         {"code": "0"}, {"code": True}):
+            with self.subTest(business=business):
+                result = self.fetch_result({"structuredContent": {"data": ROWS, **business}})
+                self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+
+    def test_iserror_keeps_explicit_no_data_distinct_from_server_error(self):
+        for business in ({"isError": True, "message": "暂无数据"},
+                         {"code": 7, "message": "暂无数据"}):
+            with self.subTest(business=business):
+                result = self.fetch_result({"structuredContent": business})
+                self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+        result = self.fetch_result({"isError": True, "content": [
+            {"type": "text", "text": "暂无数据"}, {"type": "future_kind"}]})
+        self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+        result = self.fetch_result({"isError": True, "content": [
+            {"type": "text", "text": "MOCK server failure"}]})
+        self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
+        self.assertEqual(result.payload["data"], [])
+
+    def test_rpc_invalid_params_and_internal_error_are_distinct(self):
+        for code, status in ((-32602, ProviderStatus.VALIDATION_FAILED),
+                             (-32603, ProviderStatus.UNAVAILABLE)):
+            def hook(rpc, headers, code=code):
+                if rpc["method"] == "tools/call":
+                    return MCPResponse(200, {}, encode({"jsonrpc": "2.0", "id": rpc["id"],
+                        "error": {"code": code, "message": "MOCK error"}}))
+            self.transport.hook = hook
+            with self.subTest(code=code):
+                result = self.fetch_result({}, "wenda_macro_query")
+                self.assertEqual(result.status, status)
+                self.assertEqual(result.payload["data"], [])
+
+    def test_malformed_rpc_error_is_validation_failure(self):
+        for error in (None, {}, {"code": "-32603", "message": "MOCK"},
+                      {"code": -32603}, {"code": True, "message": "MOCK"}):
+            def hook(rpc, headers, error=error):
+                if rpc["method"] == "tools/call":
+                    return MCPResponse(200, {}, encode({"jsonrpc": "2.0", "id": rpc["id"], "error": error}))
+            self.transport.hook = hook
+            with self.subTest(error=error):
+                self.assertEqual(self.fetch_result({}).status, ProviderStatus.VALIDATION_FAILED)
+
+    def test_business_error_does_not_cache_or_retry_automatically(self):
+        result = self.fetch_result({"structuredContent": {"ok": False, "message": "服务端拒绝"}})
+        self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
+        self.assertEqual(len([c for c in self.transport.calls if c[0]["method"] == "tools/call"]), 1)
+        self.transport.result = {"structuredContent": {"response": ROWS}}
+        self.assertEqual(self.provider.fetch(query("tdx_ai_listening")).status, ProviderStatus.AVAILABLE)
+
+    def test_legal_empty_listening_markdown_still_deduplicates(self):
+        first = self.fetch_result({"content": [{"type": "text", "text": "暂无数据"},
+                                               {"type": "future_kind"}]})
+        before = len(self.transport.calls)
+        second = self.provider.fetch(query("tdx_ai_listening", request_id="another_request"))
+        self.assertEqual(first, second)
+        self.assertEqual(len(self.transport.calls), before)
+
+    def test_unknown_metadata_key_echo_rejected_before_evidence_storage(self):
+        result = self.fetch_result({"content": [
+            {"type": "text", "text": "MOCK business markdown"},
+            {"type": "future_kind", "echo": "TEST_KEY_ONLY"}]})
+        self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(len(result.payload["evidence"]), 2)  # Control plane only.
+        self.assertTrue(all(b"TEST_KEY_ONLY" not in p.read_bytes() for p in self.root.rglob("*.json")))
 
 
 class TransportTests(unittest.TestCase):

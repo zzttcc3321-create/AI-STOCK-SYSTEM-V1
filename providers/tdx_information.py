@@ -76,8 +76,9 @@ class MCPHTTPTransport:
 
 
 class _Failure(Exception):
-    def __init__(self, status: ProviderStatus):
+    def __init__(self, status: ProviderStatus, message: str | None = None):
         self.status = status
+        self.message = message
 
 
 class _SessionExpired(Exception):
@@ -102,6 +103,51 @@ def _json(value: bytes | str) -> Any:
 def _encode(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
                       allow_nan=False).encode("utf-8")
+
+
+def _no_data(text: str) -> bool:
+    """Recognize explicit empty-result notices, never an incidental substring."""
+    return bool(re.fullmatch(
+        r"(?:暂无(?:相关)?数据|暂无相关内容|没有(?:相关)?数据|未查询到(?:相关)?数据|"
+        r"未找到(?:相关)?数据|无数据|no data(?: available| found)?|no results(?: found)?)"
+        r"[。.!！]?", text.strip(), re.IGNORECASE))
+
+
+def _business_error(value: dict) -> None:
+    for flag in ("ok", "isError"):
+        if flag in value and type(value[flag]) is not bool:
+            raise _Failure(ProviderStatus.VALIDATION_FAILED)
+    if "code" in value and type(value["code"]) is not int:
+        raise _Failure(ProviderStatus.VALIDATION_FAILED)
+    messages = [value.get(name) for name in ("message", "msg", "error")]
+    if isinstance(value.get("error"), dict):
+        messages.append(value["error"].get("message"))
+    no_data = any(isinstance(item, str) and _no_data(item) for item in messages)
+    if value.get("ok") is False or value.get("code", 0) != 0:
+        if no_data:
+            raise _Failure(ProviderStatus.NOT_AVAILABLE, "TDX business result: no data")
+        # The frozen status enum has no PROVIDER_ERROR. Keep remote business
+        # failures distinct from local parameters and malformed responses.
+        raise _Failure(ProviderStatus.UNAVAILABLE, "TDX business error: server rejected or failed the query")
+    if value.get("isError") is True and no_data:
+        raise _Failure(ProviderStatus.NOT_AVAILABLE, "TDX business result: no data")
+
+
+def _business_data(value):
+    if isinstance(value, dict):
+        _business_error(value)
+        if value.get("isError") is True:
+            raise _Failure(ProviderStatus.UNAVAILABLE, "TDX tool reported a server error")
+        if "data" in value and "response" in value and value["data"] != value["response"]:
+            raise _Failure(ProviderStatus.VALIDATION_FAILED)
+        if "data" not in value and "response" not in value:
+            raise _Failure(ProviderStatus.VALIDATION_FAILED)
+        value = value["data"] if "data" in value else value["response"]
+    if value is None:
+        return []
+    if not isinstance(value, (list, dict)):
+        raise _Failure(ProviderStatus.VALIDATION_FAILED)
+    return value
 
 
 def _plain(value: Any) -> Any:
@@ -330,7 +376,13 @@ class TdxInformationProvider(Provider):
                 or ("result" in value) == ("error" in value)):
             raise _Failure(ProviderStatus.VALIDATION_FAILED)
         if "error" in value:
-            raise _Failure(ProviderStatus.VALIDATION_FAILED)
+            error = value["error"]
+            if (not isinstance(error, dict) or type(error.get("code")) is not int
+                    or not isinstance(error.get("message"), str)):
+                raise _Failure(ProviderStatus.VALIDATION_FAILED)
+            if error["code"] in (-32700, -32600, -32601, -32602):
+                raise _Failure(ProviderStatus.VALIDATION_FAILED, "TDX RPC rejected the request or parameters")
+            raise _Failure(ProviderStatus.UNAVAILABLE, "TDX RPC reported a server error")
         return value["result"], response.headers
 
     def _handshake(self, *, context, at, entries) -> None:
@@ -388,32 +440,62 @@ class TdxInformationProvider(Provider):
                 raise
 
     @staticmethod
-    def _data(result):
-        if (not isinstance(result, dict) or result.get("isError", False) is not False
-                or ("code" in result and (type(result["code"]) is not int or result["code"] != 0))):
+    def _data(result, *, tool: str):
+        if not isinstance(result, dict):
             raise _Failure(ProviderStatus.VALIDATION_FAILED)
+        _business_error(result)
+        empty_notice = False
         if "structuredContent" in result:
-            value = result["structuredContent"]
+            data = _business_data(result["structuredContent"])
+        elif "data" in result or "response" in result:
+            data = _business_data(result)
         else:
             content = result.get("content")
             if not isinstance(content, list):
                 raise _Failure(ProviderStatus.VALIDATION_FAILED)
-            if not content:
-                return []
-            if len(content) != 1 or not isinstance(content[0], dict) or content[0].get("type") != "text":
+            values = []
+            for item in content:
+                if not isinstance(item, dict) or not isinstance(item.get("type"), str):
+                    raise _Failure(ProviderStatus.VALIDATION_FAILED)
+                if item["type"] != "text":
+                    continue  # Unknown items remain verbatim in raw Evidence.
+                text = item.get("text")
+                if not isinstance(text, str):
+                    raise _Failure(ProviderStatus.VALIDATION_FAILED)
+                try:
+                    value = _json(text)
+                except json.JSONDecodeError:
+                    if text.lstrip().startswith(("{", "[")):
+                        raise _Failure(ProviderStatus.VALIDATION_FAILED) from None
+                    if tool != "tdx_ai_listening":
+                        continue
+                    # App metadata is evidence, not a business article.
+                    if "_meta" in item:
+                        continue
+                    lines = [line.strip().strip("*>_ ") for line in text.splitlines()
+                             if line.strip() and not line.lstrip().startswith("#")]
+                    if lines and all(_no_data(line) for line in lines):
+                        value = []
+                        empty_notice = True
+                    elif text.strip():
+                        value = [deepcopy(item)]  # Preserve source markdown as supplied.
+                    else:
+                        value = []
+                if isinstance(value, dict):
+                    _business_error(value)
+                    if not any(name in value for name in ("data", "response", "isError", "ok", "code")):
+                        continue  # Unrecognized JSON/App metadata is raw-only.
+                values.append(_business_data(value))
+            if content and not values:
                 raise _Failure(ProviderStatus.VALIDATION_FAILED)
-            value = _json(content[0]["text"])
-        if isinstance(value, dict):
-            if "code" in value and (type(value["code"]) is not int or value["code"] != 0):
-                raise _Failure(ProviderStatus.VALIDATION_FAILED)
-            if "data" not in value:
-                raise _Failure(ProviderStatus.VALIDATION_FAILED)
-            value = value["data"]
-        if value is None:
-            return []
-        if not isinstance(value, (list, dict)):
-            raise _Failure(ProviderStatus.VALIDATION_FAILED)
-        return value
+            nonempty = [value for value in values if value]
+            data = nonempty[0] if len(nonempty) == 1 else [
+                row for value in nonempty for row in (value if isinstance(value, list) else [value])]
+        if result.get("isError") is True:
+            if empty_notice and not data:
+                raise _Failure(ProviderStatus.NOT_AVAILABLE, "TDX business result: no data")
+            raise _Failure(ProviderStatus.UNAVAILABLE, "TDX tool reported a server error")
+        return data
 
     def fetch(self, request: Mapping[str, Any]) -> ProviderEnvelope:
         at = self._clock().astimezone(CHINA_TZ).isoformat()
@@ -421,11 +503,12 @@ class TdxInformationProvider(Provider):
         kind = request.get("data_kind", "news") if isinstance(request, Mapping) else "news"
         payload = {"data": [], "canonical_data": [], "evidence": entries}
 
-        def envelope(status):
+        def envelope(status, message=None):
             reference = entries[-1]["record"]["raw_response_path"] if entries else None
             error = None if status == ProviderStatus.AVAILABLE else ContractError(
                 ContractErrorCode.INVALID_DATA_KIND_SCOPE if status == ProviderStatus.VALIDATION_FAILED
-                else ContractErrorCode.MISSING_REQUIRED_FIELD, "TDX information query did not produce verified data")
+                else ContractErrorCode.MISSING_REQUIRED_FIELD,
+                message or "TDX information query did not produce verified data")
             return ProviderEnvelope(LOGICAL_SOURCE, kind, status, at, None, reference, payload, error)
 
         try:
@@ -464,7 +547,7 @@ class TdxInformationProvider(Provider):
                     raise _Failure(ProviderStatus.NOT_AVAILABLE)
                 result, _ = self._rpc("tools/call", {"name": tool, "arguments": arguments},
                                       context=context, at=at, entries=entries)
-                return self._data(result)
+                return self._data(result, tool=tool)
 
             payload["data"] = self._execute(call, context=context, at=at, entries=entries)
             status = ProviderStatus.AVAILABLE if payload["data"] else ProviderStatus.NOT_AVAILABLE
@@ -479,7 +562,7 @@ class TdxInformationProvider(Provider):
                 self._cache_bytes += size
             return result
         except _Failure as exc:
-            return envelope(exc.status)
+            return envelope(exc.status, exc.message)
         except OSError:
             return envelope(ProviderStatus.NOT_AVAILABLE)
         except (AttributeError, KeyError, TypeError, ValueError, UnicodeError, RecursionError):
