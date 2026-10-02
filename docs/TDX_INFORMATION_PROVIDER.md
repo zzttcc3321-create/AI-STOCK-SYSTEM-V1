@@ -323,7 +323,7 @@ SHA-256 仍基于 wire bytes，未改写历史 Evidence。当前 Key 回显的�
 - [FINAL_DEV_BOX_REAL_VERIFY] 2026-10-03T00:30+08:00 已在 dev-box 用真实 Key 完成复验：6/6 通过（见下方 CODE_REVIEW_PACKAGE_A 的 REAL_ENDPOINT_VERIFICATION=PASS 记录）。
 - 静态检查 PASS：git diff --check、全部 Python AST、严格 3 文件范围、R1 三个参数/日期函数与六项身份/白名单常量的 AST 比对。
 - 凭据扫描 PASS：49 个跟踪文件的禁入文件名、私钥/AWS/GitHub/OpenAI 常见凭据模式、Python 硬编码凭据赋值检查。
-  这是一组本地模式扫描，不能代替配置真实 Key 后的真实 Evidence 扫描；本轮未取得真实 Key。
+  这是一组本地模式扫描，不能代替配置真实 Key 后的真实 Evidence 扫描；该静态扫描步骤未读取真实 Key。（真实 Key 仅用于 dev-box 真实接口复验，未进 Git。）
 
 ### R2 Git 交付与真实复验脚本
 
