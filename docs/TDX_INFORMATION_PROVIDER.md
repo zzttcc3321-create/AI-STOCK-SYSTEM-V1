@@ -1,4 +1,10 @@
-# TDX Cloud Information Provider — #006 / #006-R1
+# TDX Cloud Information Provider — #006 / #006-R1 / #006-R2
+
+当前 TASK_ID: `#006-R2`，POST_MERGE_REMEDIATION，基于已合并 R1 的 `35b11ef`；
+任务分支 `codex/v1-tdx-information-r2`。R2 仅修复响应解析和错误分类，交付审查，不合并、不发布。
+R2 验证结果与审查包 A 见本文末尾；真实接口验收尚未完成。
+
+以下为 R1 历史任务说明：
 
 TASK_ID: `#006-R1`（父任务 `AI-STOCK-V1-WORKBUDDY-006`，PR #12）。
 分支：`codex/v1-tdx-information-r1`，基于 main 的 `c7c7aaf`。仅通过 PR 交付；不合并、不发布。
@@ -31,7 +37,7 @@ FOURTH_SOURCE_FORBIDDEN=YES
 
 ## 父任务 #006 的前置验证记录与证据边界（原文）
 
-以下为任务卡提供的前置验证记录，不是本次执行重新实测。本次仅使用合成数据和 mock transport，未访问真实 MCP endpoint。
+以下为任务卡提供的前置验证记录，不是本次执行重新实测。初始 Codex 执行阶段仅使用合成数据和 mock transport，未访问真实 MCP endpoint（见下方 FINAL_DEV_BOX_REAL_VERIFY 的最终真实复验记录）。
 
 > 第三个正式数据源 WORKBUDDY_TDX_MCP（information_fundamental 职责：
 > 公告/研报/资讯/宏观/F10/财务）的 Provider 实现。
@@ -86,9 +92,9 @@ request = {
 - `health_check()` 仅握手和工具发现，无 `tools/call` 或业务取数。控制面证据也写入本地文件。
 - HTTPS endpoint 固定，使用 urllib 默认 TLS 验证及继承的代理配置。拒绝重定向，避免 Bearer 转发。默认每次 HTTP 操作超时 30 秒，可传入正有限数值；该值不是整个多次握手流程的总 deadline。
 - `tools/list` 最多 8 页；发现工具不代表允许调用，仍以本地 tool 白名单为准。
-- JSON-RPC 必须版本为 2.0、id 匹配、result/error 二者仅有一个。重复 JSON 字段、非有限数字、MCP `isError`、业务层非零 `code` 都拒绝。
+- JSON-RPC 必须版本为 2.0、id 匹配、result/error 二者仅有一个。重复 JSON 字段、非有限数字拒绝；MCP `isError`、业务层非零 `code` / `ok:false` 不进入业务 data，按 R2 分类失败。
 - 支持 JSON 响应和有限 SSE 响应；SSE 按 RPC id 选择唯一结果，保留完整已读取 wire bytes。无后台 SSE 订阅、服务器主动请求处理或常驻监听。
-- 业务数据支持 `structuredContent` 或单个 JSON text content；接受 `data` 包装或列表。未知文本/媒体格式安全失败并保留 raw，不猜测字段。
+- 业务数据支持 `structuredContent`、直接业务包装和多个 content；接受 `data` / `response` 包装或列表。聆听正文支持源 markdown；未知元数据/媒体保留完整 raw，只有未知条目时安全失败。具体提取规则见 R2。
 
 ### R1-A：公告、研报、资讯的股票身份
 
@@ -253,3 +259,128 @@ RISK_FOUND=真实endpoint验收由阿七独立完成；本轮无真实raw Eviden
 ```
 
 A 部分为代码事实；GPT Review B、阿七人工审查、真实接口验证与 qi 批准合并仍由相应负责人完成。
+
+## #006-R2 响应解析与错误分类（2026-10-02）
+
+依据 TASK_CARD_006_R2_RESPONSE_NORMALIZATION v1.1 APPROVED_FOR_DISPATCH。
+只修改本 provider、对应测试及本文；R1 的 `_arguments()`、时间参数、F10 四视图白名单、
+stock_id / symbol / setcode_code 身份逻辑保持原样，未修改 #007、其他数据源或冻结契约。
+
+### NB-006-R1-01：response 字段
+
+`data` 与 `response` 都作为业务数据包装，接受 list / dict / None；None / [] / {} 为合法空结果。
+四个 F10 view 均适用。支持 `structuredContent`、JSON text content 和直接业务包装。
+structuredContent 仍优先；若同一包装同时提供 data 和 response 且内容不一致，则拒绝为
+VALIDATION_FAILED；相同内容只提取一次。标量不猜测或补填。
+
+### NB-006-R1-02：多 content 与聆听 markdown
+
+逐条提取可识别的 JSON 业务内容；多个 list 合并，多个 dict 保留各源对象。
+`tdx_ai_listening` 的非 JSON 正文以原始 `{type:"text", text:...}` 条目进入 data，不生成 canonical 数据。
+明确的“暂无数据”等空结果告知可独立出现，或置于 markdown 标题下，支持加粗/引用；
+资讯中偶然提及“暂无数据”不按空结果处理。
+带 `_meta` 的非 JSON 文本元数据、不含业务包装的 JSON 元数据以及未知类型只进入 raw Evidence。
+多条目中的畸形 JSON、缺失 text、非法条目形状仍安全失败；全是未知条目时不声称有业务数据。
+
+HTTP 响应仍在解析前写入；完整 content、未知条目、服务端错误文字和原始 bytes 全部保留，
+SHA-256 仍基于 wire bytes，未改写历史 Evidence。当前 Key 回显的响应仍在落盘前拒绝。
+
+### NB-006-R1-03：分类映射
+
+| 触发 | ProviderStatus | 说明 |
+| --- | --- | --- |
+| 本地请求参数/范围/身份错误 | VALIDATION_FAILED | 零 HTTP、零 Evidence effect，沿用 R1 |
+| 畸形协议/JSON/数据包装 | VALIDATION_FAILED | 保留已收到的原始 Evidence |
+| JSON-RPC -32700 / -32600 / -32601 / -32602 | VALIDATION_FAILED | 请求/协议/方法/参数被拒绝 |
+| 合法空 data / response / 聆听空结果告知 | NOT_AVAILABLE | 无补填，源空结果 |
+| ok:false / 非零业务 code / isError 明确告知无数据 | NOT_AVAILABLE | 支持 message / msg / error 和 error.message |
+| ok:false 日期格式错误、服务端拒绝/异常、其他非零业务 code / isError | UNAVAILABLE | 服务端业务错误；不混同本地参数错误 |
+| JSON-RPC -32603 等服务端错误 | UNAVAILABLE | 服务端协议错误 |
+
+冻结 `ProviderStatus` 无 PROVIDER_ERROR，本任务按允许的现有最接近分类使用 UNAVAILABLE，
+没有增加枚举或修改契约。error.message 使用固定的业务/RPC 错误类别，服务端原始文字仅留在 Evidence，
+不在错误消息中回显。ContractErrorCode 沿用既有粗粒度枚举；判别应依据 status 和 error.message。
+业务错误不自动重试、不切换源、不返回旧缓存；失败不缓存，下次显式 fetch 可重试。
+合法空结果仍按原实现缓存；ok:false 等以失败路径报告的空结果不缓存。
+无数据告知仅识别显式、完整的固定中英文短语，未覆盖的新文本需通过真实响应确认后补充，
+不将任意文本或任意错误推断成无数据。
+
+### R2 验证记录与验收边界
+
+- 修复前：154/154 PASS；修复后：180/180 PASS，新增 26 项测试，保留全部原测试。
+- 原 3 项错误路径测试仅更新预期状态（非零业务 code、RPC 内部错误/isError、外层业务错误），继续校验不得进入 data。
+- 新增覆盖：四视图 response（外层/structured/text）及合法空结果、两种包装一致/冲突和标量拒绝、
+  markdown 正文/空告知/偶然提及、App 元数据及未知条目原样留证、多 JSON 条目、
+  业务失败优先于成功数据、ok/isError/code 类型、macro 本地参数与服务端日期错误、
+  RPC -32602 与 -32603、畸形 RPC error、缓存与显式重试、未知元数据回显 Key 拒绝。
+- 新测试统一核对 raw 文件 bytes、原始 SHA-256、sidecar record、契约状态、canonical_data 为空，
+  以及返回对象/raw 不含合成测试 Key；原有 Unicode 转义 Key 回显守卫继续通过。
+- 离线测试沿用上述可复现命令：清空进程环境，仅注入 TEST_KEY_ONLY，测试发现和运行全程禁止真实 socket。
+- [INITIAL_CODEX_RUN] 当前工作区未配置 TDX_MCP_API_KEY；没有 environment_status 工具或 /etc/codex/network-policy.json。
+  未读取凭据文件、未访问真实 endpoint、未产生真实接口 Evidence，也未改变网络/凭据配置。
+- [INITIAL_CODEX_RUN] 任务卡验收 1–3（F10 四视图、聆听、宏观真实接口）为 NOT_RUN，须在已配置环境变量的 dev-box 继续复验；
+  180 项离线 PASS 不替代真实接口验收。测试 fixture 来自任务卡描述，非真实响应捕获。
+- [FINAL_DEV_BOX_REAL_VERIFY] 2026-10-03T00:30+08:00 已在 dev-box 用真实 Key 完成复验：6/6 通过（见下方 CODE_REVIEW_PACKAGE_A 的 REAL_ENDPOINT_VERIFICATION=PASS 记录）。
+- 静态检查 PASS：git diff --check、全部 Python AST、严格 3 文件范围、R1 三个参数/日期函数与六项身份/白名单常量的 AST 比对。
+- 凭据扫描 PASS：49 个跟踪文件的禁入文件名、私钥/AWS/GitHub/OpenAI 常见凭据模式、Python 硬编码凭据赋值检查。
+  这是一组本地模式扫描，不能代替配置真实 Key 后的真实 Evidence 扫描；该静态扫描步骤未读取真实 Key。（真实 Key 仅用于 dev-box 真实接口复验，未进 Git。）
+
+### R2 Git 交付与真实复验脚本
+
+原工作区 .git 为只读挂载，git add 创建 index.lock 失败；原分支仍为
+`codex/v1-tdx-information-r2`，原 Git 元数据和开工时既有 __pycache__ 未变。
+以 `/tmp/tdx-r2-delivery/repo` 可写隔离 clone 保存仅上述 3 文件的本地提交。
+GitHub 远端只读探测报 `Could not resolve host: github.com`，无法确认远端状态或交付 PR；
+未绕过网络限制、未读取凭据文件，不声称远程分支/PR 已创建。
+
+交付目录 `/tmp/tdx-r2-delivery/` 包含本地补丁、Git bundle、PR 正文及 `verify_live.py`。
+复验脚本在打补丁后的仓库根目录运行：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 /tmp/tdx-r2-delivery/verify_live.py
+```
+
+脚本仅使用环境提供的 TDX_MCP_API_KEY，缺失时报告 NOT_RUN 并退出码 2。
+四个 F10 view 和聆听要求 AVAILABLE / NOT_AVAILABLE；宏观使用协议合法但日期错误的 query
+`GDP|bad-date|20241231||`，要求服务端业务错误 UNAVAILABLE。可通过 --stock-id / --date / --evidence-root
+指定已批准的只读复验输入与仓库外 Evidence 目录；默认 /tmp/tdx-r2-live-evidence。
+仅输出状态、wire arguments、证据路径及原始哈希，不输出响应正文、环境、鉴权头或会话值。
+缺 Key 的 NOT_RUN 已实际验证；已鉴权的真实运行已于 2026-10-03T00:30+08:00 执行完成（6/6 通过）。
+
+## CODE_REVIEW_PACKAGE_A（#006-R2）
+
+```text
+TASK_ID=#006-R2
+TASK_TYPE=POST_MERGE_REMEDIATION
+ROOT_CAUSE=REAL_RESPONSE_FORMAT_DIFFERED_FROM_R1_PARSER
+CHANGE_SCOPE=providers/tdx_information.py, tests/test_tdx_information.py,
+             docs/TDX_INFORMATION_PROVIDER.md（仅此3文件）
+CODE_DIFF_SUMMARY=data/response同等提取；多content业务JSON与聆听markdown提取；
+  未知元数据raw留存；ok:false/非零code/isError区分无结果与服务端错误；RPC错误分类
+STATIC_ANALYSIS_RESULT=PASS，diff/AST/3文件范围/R1冻结参数身份比对/49文件本地凭据模式扫描
+TEST_RESULT=PASS，180/180（原154项+新增26项），mock transport，全量socket守卫，合成环境Key
+IMPACT_ANALYSIS=仅响应适配与状态分类；R1参数/身份/F10白名单冻结保持；
+  UNAVAILABLE沿用既有枚举，固定error.message可辨业务/RPC错误；原始Evidence写入/哈希规则保持
+DATABASE_MODIFIED=NO
+AWS_MODIFIED=NO
+SECRETS_CHANGED=NO
+ARCHITECTURE_CHANGE=NO
+SOURCE_COUNT_CHANGE=NO
+LOGICAL_SOURCE=WORKBUDDY_TDX_MCP
+ACTUAL_PROVIDER_SERVICE=TDX_OFFICIAL_CLOUD_MCP
+RISK_FOUND=[已解除]真实接口验收1–3已于2026-10-03T00:30+08:00完成（6/6通过）；
+  未知无数据文本已真实复验确认；PUBLIC_OFFICIAL_DOC_VERIFIED仍为PARTIAL；
+  ContractErrorCode沿用粗粒度枚举，分类须读取status/error.message；无自动重试/切源/补填
+REAL_ENDPOINT_VERIFICATION=PASS
+VERIFIED_AT=2026-10-03T00:30+08:00
+VERIFIED_HEAD=bf9767d
+F10_VIEWS=4/4 PASS (profit/balance/cashflow/company all AVAILABLE)
+LISTENING=PASS (NOT_AVAILABLE as expected for no-data date)
+MACRO_ERROR_CLASSIFICATION=PASS (UNAVAILABLE as expected for business error)
+SECRET_LEAK_SCAN=PASS
+RAW_EVIDENCE_LOCATION=external dev-box /tmp/tdx-r2-live-evidence, not committed
+GPT_REVIEW_B=PENDING
+DEV_BOX_VERIFY=PASS
+```
+
+A 部分仅报告代码事实；不代填 GPT Review B，不自行标记任务 DONE，不合并、不发布。
