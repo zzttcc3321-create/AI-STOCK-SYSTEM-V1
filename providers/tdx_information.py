@@ -31,6 +31,13 @@ TOOL_KINDS = {
     "wenda_news_query": "news", "wenda_macro_query": "news",
     "tdx_api_data": "financial", "tdx_ai_listening": "news",
 }
+F10_VIEWS = {
+    "profit": ("TdxShareCW.ph_agf10_cw_lyb", "00101"),
+    "balance": ("TdxShareCW.ph_agf10_cw_zcfzb", None),
+    "cashflow": ("TdxShareCW.ph_agf10_cw_xjllb", "00101"),
+    "company": ("TdxSharePCCW.tdxf10_gg_gsgk", "0"),
+}
+MARKET_SETCODES = {"SH": "1", "SZ": "0", "BJ": "2"}
 MAX_BODY_BYTES = 1024 * 1024
 MAX_CACHE_BYTES = 8 * 1024 * 1024
 MAX_CACHE_ENTRIES = 64
@@ -128,6 +135,53 @@ def _time_range(arguments: Mapping[str, Any]) -> None:
         start, end = _date(span["start"]), _date(span["end"])
     if start > end:
         raise ValueError("reversed time range")
+
+
+def _arguments(tool: str, stock: str, arguments: Mapping[str, Any]) -> dict:
+    """Validate and translate before any HTTP, cache lookup, or evidence effect."""
+    values = dict(arguments)
+    code = stock[:6]
+    if tool == "tdx_api_data":
+        # Only the view selector is public; every gateway parameter is derived.
+        view = values.get("view")
+        if set(values) != {"view"} or not isinstance(view, str) or view not in F10_VIEWS:
+            raise ValueError("F10 view outside information scope")
+        entry, fixed_tag = F10_VIEWS[view]
+        values = {"entry": entry, "code": code}
+        if fixed_tag is not None:
+            values["fixedTag"] = fixed_tag
+    elif tool == "tdx_ai_listening":
+        if set(values) - {"date", "setcode_code"}:
+            raise ValueError("listening requires date, not a time range")
+        setcode_code = MARKET_SETCODES[stock[7:]] + "_" + code
+        if "setcode_code" in values and values["setcode_code"] != setcode_code:
+            raise ValueError("stock identity mismatch")
+        day = values.get("date")
+        if not isinstance(day, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", day):
+            raise ValueError("listening date must be YYYY-MM-DD")
+        date.fromisoformat(day)  # Also reject impossible calendar dates.
+        values["setcode_code"] = setcode_code
+    else:
+        # Legacy stock_code may be a canonical id or its six-digit code. symbol
+        # is the actual wire field and must equal the derived six-digit code.
+        has_identity = "symbol" in values or "stock_code" in values
+        if has_identity and not stock:
+            raise ValueError("stock id required for stock identity")
+        if "symbol" in values and values["symbol"] != code:
+            raise ValueError("stock identity mismatch")
+        if "stock_code" in values and values["stock_code"] not in (stock, code):
+            raise ValueError("stock identity mismatch")
+        values.pop("stock_code", None)
+        if tool == "wenda_macro_query":
+            query = values.get("query")
+            if not isinstance(query, str) or len(query.split("|")) != 5:
+                raise ValueError("macro query must have five pipe-separated fields")
+            if has_identity:
+                values["symbol"] = code
+        else:
+            _time_range(values)
+            values["symbol"] = code
+    return values
 
 
 class TdxInformationProvider(Provider):
@@ -380,22 +434,14 @@ class TdxInformationProvider(Provider):
             if not isinstance(tool, str) or tool not in TOOL_KINDS or TOOL_KINDS[tool] != kind:
                 raise ValueError("out-of-scope tool or data kind")
             stock = request.get("stock_id", "")
-            if not isinstance(stock, str) or (stock and not re.fullmatch(r"\d{6}\.(SH|SZ|BJ)", stock)):
+            if not isinstance(stock, str) or (stock and not re.fullmatch(r"[0-9]{6}\.(SH|SZ|BJ)", stock)):
                 raise ValueError("invalid stock id")
-            if not stock and tool not in {"wenda_macro_query", "tdx_ai_listening"}:
+            if not stock and tool != "wenda_macro_query":
                 raise ValueError("stock id required")
             arguments = request["arguments"]
             if not isinstance(arguments, Mapping):
                 raise ValueError("arguments required")
-            _time_range(arguments)
-            if "stock_code" in arguments and arguments["stock_code"] != stock:
-                raise ValueError("stock identity mismatch")
-            if tool == "tdx_api_data":
-                # Conservative adapter vocabulary; no arbitrary generic API call.
-                allowed = {"api_name", "stock_code", "bdate", "edate", "time_range"}
-                if (set(arguments) - allowed or arguments.get("api_name") not in {"f10", "financial"}
-                        or arguments.get("stock_code") != stock):
-                    raise ValueError("F10 API outside information scope")
+            arguments = _arguments(tool, stock, arguments)
             encoded = _encode(arguments)
             if len(encoded) > 65536:
                 raise ValueError("arguments too large")
