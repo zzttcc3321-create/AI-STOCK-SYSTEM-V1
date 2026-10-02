@@ -43,10 +43,16 @@ def encode(value):
 def query(tool="wenda_report_query", **changes):
     arguments = {"stock_code": "601518.SH", "bdate": "20261001", "edate": "20261002"}
     if tool == "tdx_api_data":
-        arguments["api_name"] = "f10"
+        arguments = {"view": "profit"}
+    elif tool == "tdx_ai_listening":
+        arguments = {"date": "2026-10-02"}
+    elif tool == "wenda_macro_query":
+        arguments = {"query": "GDP|20240101|20241231||"}
     value = {"stock_id": "601518.SH", "tool": tool, "data_kind": TOOL_KINDS.get(tool, "news"),
              "arguments": arguments, "system_run_id": "run_006", "collection_task_id": "task_006",
              "request_id": "request_006"}
+    if tool == "wenda_macro_query":
+        value["stock_id"] = ""
     value.update(changes)
     return value
 
@@ -159,8 +165,237 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result.payload["canonical_data"], [])
         self.assertTrue(self.provider.validate_contract(result).valid)
         self.assertIsNone(result.provider_timestamp)
+        expected = {"symbol": "601518", "bdate": "20261001", "edate": "20261002"}
+        if tool == "tdx_api_data":
+            expected = {"entry": "TdxShareCW.ph_agf10_cw_lyb", "code": "601518", "fixedTag": "00101"}
+        elif tool == "tdx_ai_listening":
+            expected = {"setcode_code": "1_601518", "date": "2026-10-02"}
+        elif tool == "wenda_macro_query":
+            expected = {"query": "GDP|20240101|20241231||"}
         self.assertEqual(self.calls("tools/call")[0][0]["params"],
-                         {"name": tool, "arguments": query(tool)["arguments"]})
+                         {"name": tool, "arguments": expected})
+        self.assertEqual(result.payload["arguments"], expected)
+        self.assertEqual(result.payload["evidence"][-1]["record"]["request_params"]["params"]["arguments"], expected)
+
+    def assert_rejected_without_effect(self, request):
+        call_count = len(self.transport.calls)
+        files = set(self.root.rglob("*.json"))
+        result = self.provider.fetch(request)
+        self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(result.payload["data"], [])
+        self.assertEqual(result.payload["evidence"], [])
+        self.assertIsNone(result.raw_reference)
+        self.assertEqual(len(self.transport.calls), call_count)
+        self.assertEqual(set(self.root.rglob("*.json")), files)
+
+    def test_stock_id_generates_symbol_for_all_stock_wenda_tools_and_markets(self):
+        for tool in ("wenda_notice_query", "wenda_report_query", "wenda_news_query"):
+            for stock in ("601518.SH", "000001.SZ", "920001.BJ"):
+                with self.subTest(tool=tool, stock=stock):
+                    args = {"bdate": "20261001", "edate": "20261002"}
+                    result = self.provider.fetch(query(tool, stock_id=stock, arguments=args))
+                    self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+                    self.assertEqual(self.calls("tools/call")[-1][0]["params"]["arguments"],
+                                     {**args, "symbol": stock[:6]})
+
+    def test_matching_symbol_and_legacy_stock_code_unify_to_one_effect(self):
+        first = self.provider.fetch(query(arguments={"bdate": "20261001", "edate": "20261002"}))
+        for identity in ({"symbol": "601518"}, {"stock_code": "601518"},
+                         {"stock_code": "601518.SH"},
+                         {"symbol": "601518", "stock_code": "601518.SH"},
+                         {"symbol": "601518", "stock_code": "601518"}):
+            with self.subTest(identity=identity):
+                request = query(arguments={"bdate": "20261001", "edate": "20261002", **identity})
+                self.assertEqual(self.provider.fetch(request), first)
+        self.assertEqual(first.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(len(self.calls("tools/call")), 1)
+        self.assertNotIn("stock_code", first.payload["arguments"])
+
+    def test_conflicting_stock_aliases_rejected_before_any_http(self):
+        for tool in ("wenda_notice_query", "wenda_report_query", "wenda_news_query"):
+            for identity in ({"symbol": "000001"}, {"stock_code": "000001.SZ"},
+                             {"stock_code": "601518.SZ"},
+                             {"symbol": "601518", "stock_code": "000001"},
+                             {"symbol": "000001", "stock_code": "601518.SH"}):
+                with self.subTest(tool=tool, identity=identity):
+                    self.assert_rejected_without_effect(query(
+                        tool, arguments={"bdate": "20261001", "edate": "20261002", **identity}))
+
+    def test_stock_aliases_require_exact_string_identity(self):
+        for name in ("symbol", "stock_code"):
+            for value in (None, 601518, True, "", " 601518", "601518 ", ["601518"],
+                          {"code": "601518"}, "６０１５１８"):
+                with self.subTest(name=name, value=value):
+                    self.assert_rejected_without_effect(query(arguments={
+                        "bdate": "20261001", "edate": "20261002", name: value}))
+
+    def test_stock_conflict_cannot_return_cached_data_or_trigger_http(self):
+        self.assertEqual(self.provider.fetch(query()).status, ProviderStatus.AVAILABLE)
+        for identity in ({"symbol": "000001"}, {"stock_code": "601518.SZ"}):
+            self.assert_rejected_without_effect(query(arguments={
+                "bdate": "20261001", "edate": "20261002", **identity}))
+
+    def test_translated_symbol_in_wire_payload_and_evidence_without_mutating_request(self):
+        request = query()
+        before = json.loads(json.dumps(request))
+        result = self.provider.fetch(request)
+        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(request, before)
+        wire_args = self.calls("tools/call")[0][0]["params"]["arguments"]
+        self.assertEqual(wire_args["symbol"], "601518")
+        self.assertNotIn("stock_code", wire_args)
+        self.assertNotIn("stock_code", result.payload["arguments"])
+        for path in self.root.rglob("*.evidence.json"):
+            self.assertNotIn("stock_code", path.read_text())
+        expected_hash = hashlib.sha256(json.dumps(
+            wire_args, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(result.payload["parameters_hash"], expected_hash)
+
+    def test_listening_setcode_code_derived_from_all_three_markets(self):
+        for stock, expected in (("601518.SH", "1_601518"), ("000001.SZ", "0_000001"),
+                                ("920001.BJ", "2_920001")):
+            with self.subTest(stock=stock):
+                result = self.provider.fetch(query("tdx_ai_listening", stock_id=stock))
+                self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+                self.assertEqual(self.calls("tools/call")[-1][0]["params"]["arguments"],
+                                 {"setcode_code": expected, "date": "2026-10-02"})
+
+    def test_listening_matching_setcode_code_unifies_to_same_cache_key(self):
+        first = self.provider.fetch(query("tdx_ai_listening"))
+        second = self.provider.fetch(query("tdx_ai_listening", arguments={
+            "setcode_code": "1_601518", "date": "2026-10-02"}))
+        self.assertEqual(first.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(second, first)
+        self.assertEqual(len(self.calls("tools/call")), 1)
+
+    def test_listening_setcode_conflicts_rejected_before_http(self):
+        for value in ("0_601518", "1_000001", "2_601518", "1_601518 ", "", None, 601518,
+                      ["1_601518"]):
+            with self.subTest(value=value):
+                self.assert_rejected_without_effect(query("tdx_ai_listening", arguments={
+                    "setcode_code": value, "date": "2026-10-02"}))
+
+    def test_listening_conflict_rejected_after_cached_success(self):
+        self.provider.fetch(query("tdx_ai_listening"))
+        self.assert_rejected_without_effect(query("tdx_ai_listening", arguments={
+            "date": "2026-10-02", "setcode_code": "0_601518"}))
+
+    def test_listening_stock_id_required_and_cannot_be_supplied_by_setcode(self):
+        for stock in ("", None, "601518", "601518.XX", "６０１５１８.SH"):
+            with self.subTest(stock=stock):
+                self.assert_rejected_without_effect(query("tdx_ai_listening", stock_id=stock, arguments={
+                    "date": "2026-10-02", "setcode_code": "1_601518"}))
+
+    def test_listening_date_is_required_strict_and_calendar_valid(self):
+        for day in (None, "", "20261002", "2026-1-02", "2026-10-2", "2026/10/02",
+                    "2026-10-02T00:00:00", "2026-10-02\n", " 2026-10-02", "２０２６-１０-０２",
+                    "2026-02-29", "2026-02-30", "2026-13-01", "0000-01-01", 20261002):
+            with self.subTest(day=day):
+                self.assert_rejected_without_effect(query("tdx_ai_listening", arguments={"date": day}))
+        self.assert_rejected_without_effect(query("tdx_ai_listening", arguments={}))
+
+    def test_listening_valid_leap_day_and_empty_result(self):
+        self.transport.result = {"structuredContent": {"code": 0, "data": []}}
+        result = self.provider.fetch(query("tdx_ai_listening", arguments={"date": "2024-02-29"}))
+        self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+        self.assertTrue(result.payload["evidence"])
+        self.assertEqual(self.calls("tools/call")[-1][0]["params"]["arguments"],
+                         {"setcode_code": "1_601518", "date": "2024-02-29"})
+
+    def test_listening_time_ranges_never_substitute_for_date(self):
+        for args in ({"bdate": "20261001", "edate": "20261002"},
+                     {"time_range": {"start": "20261001", "end": "20261002"}},
+                     {"date": "2026-10-02", "bdate": "20261001", "edate": "20261002"}):
+            with self.subTest(args=args):
+                self.assert_rejected_without_effect(query("tdx_ai_listening", arguments=args))
+
+    def test_macro_query_required_string_and_five_pipe_fields(self):
+        for args in ({}, {"bdate": "20240101", "edate": "20241231"},
+                     {"query": None}, {"query": 123}, {"query": []}, {"query": "GDP"},
+                     {"query": "GDP|20240101|20241231|"},
+                     {"query": "GDP|20240101|20241231|||extra"}):
+            with self.subTest(args=args):
+                self.assert_rejected_without_effect(query("wenda_macro_query", arguments=args))
+
+    def test_macro_query_passthrough_without_date_semantics_or_stock_requirement(self):
+        text = "宏观主题|自定义起始|自定义截止|关键词|描述"
+        request = query("wenda_macro_query", arguments={"query": text})
+        request.pop("stock_id")
+        result = self.provider.fetch(request)
+        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(self.calls("tools/call")[0][0]["params"]["arguments"], {"query": text})
+
+    def test_macro_stock_aliases_still_require_outer_identity_and_remove_stock_code(self):
+        args = {"query": "GDP|20240101|20241231||", "stock_code": "601518.SH"}
+        self.assert_rejected_without_effect(query("wenda_macro_query", arguments=args))
+        self.assert_rejected_without_effect(query("wenda_macro_query", stock_id="000001.SZ", arguments=args))
+        result = self.provider.fetch(query("wenda_macro_query", stock_id="601518.SH", arguments=args))
+        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+        self.assertEqual(self.calls("tools/call")[-1][0]["params"]["arguments"],
+                         {"query": args["query"], "symbol": "601518"})
+
+    def test_f10_all_four_view_mappings_exact_wire_parameters(self):
+        for view, expected in (
+            ("profit", {"entry": "TdxShareCW.ph_agf10_cw_lyb", "fixedTag": "00101", "code": "601518"}),
+            ("balance", {"entry": "TdxShareCW.ph_agf10_cw_zcfzb", "code": "601518"}),
+            ("cashflow", {"entry": "TdxShareCW.ph_agf10_cw_xjllb", "fixedTag": "00101", "code": "601518"}),
+            ("company", {"entry": "TdxSharePCCW.tdxf10_gg_gsgk", "fixedTag": "0", "code": "601518"}),
+        ):
+            with self.subTest(view=view):
+                request = query("tdx_api_data", arguments={"view": view})
+                result = self.provider.fetch(request)
+                self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+                self.assertEqual(self.calls("tools/call")[-1][0]["params"]["arguments"], expected)
+                self.assertEqual(result.payload["arguments"], expected)
+                self.assertEqual(result.payload["evidence"][-1]["record"]["request_params"]["params"]["arguments"], expected)
+                self.assertEqual(request["arguments"], {"view": view})
+        self.assertEqual(len(self.calls("tools/call")), 4)
+
+    def test_f10_code_is_derived_from_stock_id_including_leading_zero(self):
+        for stock in ("000001.SZ", "920001.BJ"):
+            with self.subTest(stock=stock):
+                result = self.provider.fetch(query("tdx_api_data", stock_id=stock, arguments={"view": "balance"}))
+                self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+                self.assertEqual(self.calls("tools/call")[-1][0]["params"]["arguments"],
+                                 {"entry": "TdxShareCW.ph_agf10_cw_zcfzb", "code": stock[:6]})
+
+    def test_f10_missing_or_non_whitelisted_views_rejected(self):
+        self.assert_rejected_without_effect(query("tdx_api_data", arguments={}))
+        for view in (None, "", "f10", "financial", "raw", "quote", "Profit", "profit ",
+                     "TdxShareCW.ph_agf10_cw_lyb", 1, ["profit"], {"view": "profit"}):
+            with self.subTest(view=view):
+                self.assert_rejected_without_effect(query("tdx_api_data", arguments={"view": view}))
+
+    def test_f10_entry_fixedtag_and_code_cannot_be_caller_supplied_even_if_matching(self):
+        for update in ({"entry": "TdxShareCW.ph_agf10_cw_lyb"}, {"entry": "tdx_quotes"},
+                       {"fixedTag": "00101"}, {"fixedTag": "99999"},
+                       {"code": "601518"}, {"code": "000001"}):
+            with self.subTest(update=update):
+                self.assert_rejected_without_effect(query("tdx_api_data", arguments={"view": "profit", **update}))
+        self.assert_rejected_without_effect(query("tdx_api_data", arguments={"view": "balance", "fixedTag": "00101"}))
+
+    def test_f10_raw_and_generic_passthrough_forbidden(self):
+        for update in ({"mode": "raw"}, {"mode": "view"}, {"api_name": "f10"},
+                       {"api_name": "financial"}, {"arguments": {"entry": "tdx_quotes"}},
+                       {"params": {"fixedTag": "99999"}}, {"symbol": "601518"},
+                       {"stock_code": "601518.SH"}, {"bdate": "20261001", "edate": "20261002"}):
+            with self.subTest(update=update):
+                self.assert_rejected_without_effect(query("tdx_api_data", arguments={"view": "profit", **update}))
+
+    def test_f10_overrides_rejected_even_after_cached_success(self):
+        self.provider.fetch(query("tdx_api_data"))
+        for update in ({"fixedTag": "00101"}, {"entry": "TdxShareCW.ph_agf10_cw_lyb"}, {"mode": "raw"}):
+            self.assert_rejected_without_effect(query("tdx_api_data", arguments={"view": "profit", **update}))
+
+    def test_f10_all_four_views_accept_legal_empty_results(self):
+        self.transport.result = {"structuredContent": {"code": 0, "data": []}}
+        for view in ("profit", "balance", "cashflow", "company"):
+            with self.subTest(view=view):
+                result = self.provider.fetch(query("tdx_api_data", arguments={"view": view}))
+                self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+                self.assertTrue(result.payload["evidence"])
+                self.assertEqual(result.payload["data"], [])
+        self.assertEqual(len(self.calls("tools/call")), 4)
 
     def test_timeout_and_wrapped_timeout(self):
         for failure in (TimeoutError("TEST_KEY_ONLY"), URLError(TimeoutError())):
@@ -350,7 +585,8 @@ class ProviderTests(unittest.TestCase):
         args = {"stock_code": "601518.SH", "time_range": {"start": "2026-10-01", "end": "2026-10-02"}}
         result = self.provider.fetch(query(arguments=args))
         self.assertEqual(result.status, ProviderStatus.AVAILABLE)
-        self.assertEqual(self.calls("tools/call")[0][0]["params"]["arguments"], args)
+        self.assertEqual(self.calls("tools/call")[0][0]["params"]["arguments"],
+                         {"symbol": "601518", "time_range": args["time_range"]})
 
     def test_health_check_only_control_plane(self):
         self.assertEqual(self.provider.health_check(), ProviderStatus.AVAILABLE)

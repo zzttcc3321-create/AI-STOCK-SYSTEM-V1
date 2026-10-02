@@ -1,7 +1,8 @@
-# TDX Cloud Information Provider — #006
+# TDX Cloud Information Provider — #006 / #006-R1
 
-TASK_ID: `AI-STOCK-V1-WORKBUDDY-006`
-分支：`codex/v1-tdx-information` → `main`。仅通过 PR 交付；不合并、不发布。
+TASK_ID: `#006-R1`（父任务 `AI-STOCK-V1-WORKBUDDY-006`，PR #12）。
+分支：`codex/v1-tdx-information-r1`，基于 main 的 `c7c7aaf`。仅通过 PR 交付；不合并、不发布。
+任务类型为 POST_MERGE_REMEDIATION；根因是原 mock 假设与真实 schema 不同。D22 已确认收紧范围，qi 已批准本卡 R1-A 到 R1-D。
 
 ## 源身份和职责
 
@@ -28,7 +29,7 @@ FOURTH_SOURCE_FORBIDDEN=YES
 
 冻结契约没有 `macro`/`f10` 类别，因此使用上述现有类别。不新增逻辑源。`tdx_quotes`、`tdx_kline`、交易、下单、账户和其他 tool 在 Provider 层拒绝，不建立连接。
 
-## Task Card §2 验证记录与证据边界（原文）
+## 父任务 #006 的前置验证记录与证据边界（原文）
 
 以下为任务卡提供的前置验证记录，不是本次执行重新实测。本次仅使用合成数据和 mock transport，未访问真实 MCP endpoint。
 
@@ -58,7 +59,7 @@ FOURTH_SOURCE_FORBIDDEN=YES
 
 构造器必须指定本地 `evidence_root`。生产构造时 Key 仅从 `os.environ["TDX_MCP_API_KEY"]` 读取，缺失或包含空白时立即报配置错误，错误文本不包含值。`environ` 参数仅作为合成测试环境注入点，没有 Key 参数、配置文件读取或日志输出。不要在仓库内生成 `.env` 或写入真实 Key。
 
-下面是请求形状示例；只供理解接口，不是本次执行的联网操作，也不是已验证的真实工具参数 schema：
+下面是修复后的请求形状示例；Provider 从外层 stock_id 生成 symbol。本轮仅用 mock transport 离线测试；真实 schema 参数映射依据 #006-R1 v1.1 任务卡，修复后的真实接口验证由阿七独立执行：
 
 ```python
 from providers import TdxInformationProvider
@@ -70,7 +71,6 @@ request = {
     "data_kind": "research",
     "tool": "wenda_report_query",
     "arguments": {
-        "stock_code": "601518.SH",
         "bdate": "20261001",
         "edate": "20261002",
     },
@@ -90,9 +90,62 @@ request = {
 - 支持 JSON 响应和有限 SSE 响应；SSE 按 RPC id 选择唯一结果，保留完整已读取 wire bytes。无后台 SSE 订阅、服务器主动请求处理或常驻监听。
 - 业务数据支持 `structuredContent` 或单个 JSON text content；接受 `data` 包装或列表。未知文本/媒体格式安全失败并保留 raw，不猜测字段。
 
-所有请求必须透传明确的 `bdate`/`edate`，或 `time_range={"start": 日期, "end": 日期}`；日期支持 YYYYMMDD 和 YYYY-MM-DD，开始日期不得晚于结束日期，不能同时提供两种范围。`latest` 不被接受。调用方提供服务器实际需要的其他参数，本实现不会由日期或股票推导自然语言查询。若提供 `stock_code`，必须等于外层 `stock_id`；宏观/资讯聚合可省略 stock_id。
+### R1-A：公告、研报、资讯的股票身份
 
-`tdx_api_data` 额外仅接受 `api_name`、`stock_code`、时间范围字段，且 `api_name` 限于 `f10`/`financial`，`stock_code` 必须匹配。这是本地保守安全词汇，任务卡未提供其真实 schema；并非声称真实服务已经接受这些值。任何其他方法、fields 或嵌套通用 API 参数均拒绝。上线前应由人工利用获授权的 schema 核对具体信息子接口；当前执行不能用真实 endpoint 补证。
+`wenda_notice_query`、`wenda_report_query`、`wenda_news_query` 必须提供外层 `stock_id`，格式为 6 位 ASCII 数字加 `.SH` / `.SZ` / `.BJ`。它是唯一股票身份源，股票代码保留前导零：`601518.SH → symbol="601518"`、`000001.SZ → symbol="000001"`。
+
+调用方可省略 symbol 和旧 stock_code。若提供 symbol，必须严格等于推导出的 6 位字符串；若提供旧 stock_code，可为完整 stock_id 或同一 6 位代码。两者同时提供时分别校验，任一冲突都返回 `VALIDATION_FAILED`，不握手、不发 HTTP、不写 Evidence，也不返回已缓存结果。相同代码但市场后缀冲突的旧 stock_code 也拒绝。发送前删除 stock_code，统一生成 symbol；真实 arguments、payload、参数哈希和 Evidence 使用同一份转换后的参数，调用方原始请求不被修改。
+
+这三个工具仍要求明确的 `bdate` / `edate`，或 `time_range={"start": 日期, "end": 日期}`；日期支持 YYYYMMDD 和 YYYY-MM-DD，开始日期不得晚于结束日期，不允许同时提供两种范围或 latest。除股票身份转换外，业务时间及其他工具参数保持透传。
+
+### R1-B：24h 聆听的市场代码与日期
+
+`tdx_ai_listening` 必须提供合法 stock_id，arguments 仅接受必填 `date` 和可选 `setcode_code`。Provider 确定性生成市场代码：
+
+| stock_id | 推导的 setcode_code |
+| --- | --- |
+| `601518.SH` | `1_601518` |
+| `000001.SZ` | `0_000001` |
+| `920001.BJ` | `2_920001` |
+
+调用方自给 setcode_code 仅在严格匹配推导值时接受；冲突本地拒绝，零 HTTP effect。date 必须为字符串，严格满足 ASCII `YYYY-MM-DD`，且是合法日历日期；紧凑日期、非补零日期、带时间/空白、非闰年 2 月 29 日均拒绝。bdate / edate / time_range 不接受，也不会替代 date。
+
+```python
+# 外层 stock_id="601518.SH", tool="tdx_ai_listening", data_kind="news"
+arguments = {"date": "2026-10-02"}
+# tools/call.arguments: {"setcode_code": "1_601518", "date": "2026-10-02"}
+```
+
+### R1-C：宏观管道 query
+
+`wenda_macro_query` 的 arguments 必须含字符串 query，以 `|` 分成 5 段：`主题|起始|截止|关键词|描述`，允许空关键词/描述。仅做协议层验证，不解析主题、关键词或日期语义，原字符串直接透传；缺失、非字符串或管道段数不正确返回 `VALIDATION_FAILED`，零 HTTP effect。不再要求额外 bdate / edate / time_range，也不从它们生成 query。
+
+```python
+# tool="wenda_macro_query", data_kind="news"；可省略 stock_id
+arguments = {"query": "GDP|20240101|20241231||"}
+```
+
+宏观查询不要求 stock_id；若显式提供股票身份参数 symbol / stock_code，仍须由外层 stock_id 验证并统一为 symbol，移除 stock_code，不允许借参数绕过唯一身份源。普通宏观 query 不附加 symbol。
+
+### R1-D：F10 的 4 个 view 白名单
+
+`tdx_api_data` 必须提供合法 stock_id 和 `data_kind="financial"`。arguments **仅接受 view 一个字段**，无全量网关、raw 或通用 passthrough：
+
+| view | 固定 entry | 固定 fixedTag |
+| --- | --- | --- |
+| `profit` | `TdxShareCW.ph_agf10_cw_lyb` | `"00101"` |
+| `balance` | `TdxShareCW.ph_agf10_cw_zcfzb` | 不发送（仅需 code） |
+| `cashflow` | `TdxShareCW.ph_agf10_cw_xjllb` | `"00101"` |
+| `company` | `TdxSharePCCW.tdxf10_gg_gsgk` | `"0"` |
+
+code 从 stock_id 去市场后缀生成，view 选择器不发送到 endpoint。非法 view、mode=raw、任意 entry、调用方提供 entry / fixedTag / code（即使值与映射相同）、旧 api_name / stock_code / 时间范围字段、嵌套通用参数均本地拒绝，零 HTTP effect。映射保持 fixedTag 字符串的前导零。30 个 entry 的全量开放不在本任务范围。
+
+```python
+# 外层 stock_id="601518.SH", tool="tdx_api_data", data_kind="financial"
+arguments = {"view": "profit"}
+# tools/call.arguments:
+# {"entry": "TdxShareCW.ph_agf10_cw_lyb", "code": "601518", "fixedTag": "00101"}
+```
 
 ## 原始证据与结果
 
@@ -129,73 +182,74 @@ request = {
 
 ## 幂等、资源和运行限制
 
-去重键为 SHA-256(`stock_id + tool + SHA-256(排序后的完整参数 JSON) + 中国时区请求日`)。缓存成功/空结果；缓存命中返回原请求时间、原 Evidence 和原 request_id 的副本，重复任务不新建证据。调用方不能修改缓存内容。失败不缓存，跨日清空；更换 tool、参数、股票或请求日会查询一次新结果。
+去重键为 SHA-256(`stock_id + tool + SHA-256(排序后的完整、已转换 wire 参数 JSON) + 中国时区请求日`)。缓存成功/空结果；缓存命中返回原请求时间、原 Evidence 和原 request_id 的副本，重复任务不新建证据。调用方不能修改缓存内容。失败不缓存，跨日清空；更换 tool、参数、股票或请求日会查询一次新结果。
 
 最多 64 个条目，按 raw/参数大小保守乘 8 估算后限制缓存预算 8 MiB；超过预算不缓存，LRU 淘汰后也会重新查询。幂等范围为单进程、当日且仍驻留缓存的查询；不是跨重启/跨进程的 exactly-once 保证。磁盘证据保留不自动清理。调用方若长期保留所有 envelopes，其内存/存储另行管理。
 
 设计为一个串行脚本，由既有 cron/systemd timer 调度。不安装 Redis/Celery/Kafka，无后台线程。目标常驻内存 <100 MB；有限响应、分页和缓存服务于该目标，不声明真实服务负载下的 RSS 已实测。没有修改或部署任何 timer、AWS 或数据库配置。
 
-## 本次全量测试记录
+## #006-R1 全量离线测试与边界检查
 
-`unittest.defaultTestLoader.discover("tests")` 全量运行 130 个测试（既有 79 + 新增 51），130/130 通过；整个发现与执行流程同时 mock `socket.socket` 和 `socket.create_connection`，任何真实 TCP 调用立即失败。新增测试自身也有 module 级 socket 守卫；urllib wire 测试只 mock opener/response。未访问真实 endpoint，也未读取真实 TDX Key。
+修复前基线为 130/130 PASS。修复后保留并更新原有 130 项，新增 24 项 mock 测试，154/154 PASS。原公告/研报/资讯的时间范围、会话、SSE、鉴权故障、原始哈希、Evidence、有界缓存、跨日及其他 provider 的回归继续通过。
+
+新增测试覆盖：stock_id 生成 symbol；匹配的两种旧 stock_code 形状与 symbol 统一并去重；身份冲突及错误类型零副作用；缓存不能绕过身份验证；wire/payload/Evidence/哈希无残留 stock_code；SH/SZ/BJ setcode_code；匹配去重与冲突拒绝；必填 stock_id；date 严格格式及日历有效性；时间范围不可代替 date；macro query 必填、协议最低校验及原文透传；全部 4 个 F10 精确映射、前导零、合法空结果、非法 view、entry/fixedTag/code 覆盖与 raw/passthrough 禁令。
+
+测试发现和执行全程禁止真实 socket，清空测试进程环境并仅注入合成 TEST_KEY_ONLY；urllib wire 测试只 mock opener/response。可复现命令：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
+import os
+import unittest
+from unittest.mock import patch
+with patch.dict(os.environ, {'TDX_MCP_API_KEY': 'TEST_KEY_ONLY'}, clear=True), \
+     patch('socket.socket', side_effect=AssertionError('real network forbidden')), \
+     patch('socket.create_connection', side_effect=AssertionError('real network forbidden')):
+    suite = unittest.defaultTestLoader.discover('tests')
+    result = unittest.TextTestRunner(verbosity=1).run(suite)
+    raise SystemExit(not result.wasSuccessful())
+PY
+```
 
 ```text
-Ran 130 tests in 1.148s
+Ran 154 tests
 OK
-Peak test-process RSS (KiB): 29856
 ```
 
-这个 RSS 仅代表合成测试进程，不代表生产负载实测。
+本轮不读取或使用真实 TDX Key，不访问真实 endpoint，不生成真实响应 Evidence。任务卡 §6 的真实股票过滤验证、4 个 F10 view、macro / listening schema 和真实 raw response + SHA-256 + arguments 由阿七独立验收，离线 PASS 不替代这些门槛。
 
-## 本次 Execution Environment / Boundary Check
+仅改任务卡 §3 允许的 providers/tdx_information.py、tests/test_tdx_information.py 和本文。Key 的生产读取仍仅来自 TDX_MCP_API_KEY 环境变量；仅 information_fundamental，不动实时行情实现、数据库、bridge、dashboard、其他 provider，不新增源、不新增依赖，不解冻 P2。git diff --check、AST 解析、允许文件集检查通过；提交与远程 PR 结果以最终总结为准。
 
-2026-10-02 开工检查：git 2.34.1、gh 2.102.0 可用；分支为 `codex/v1-tdx-information`，HEAD 为 `d2643f83793a7195b150a862e514f2505ca32b42`，等于本地 `origin/main`（#11 合并）。本地 main 指针较旧，但属于 HEAD 祖先，未修改 main。
+## #006-R1 执行环境与提交限制
 
-§3a 未完整通过：GitHub DNS 失败，gh 报本地凭据无效，不能证明有效远程认证。环境技能需要的 `environment_status` 工具在本会话不可用，`/etc/codex/network-policy.json` 不存在，网络/凭据 readiness 不作肯定判断。保持继承网络设置，不绕过限制、不读凭据文件、不交互登录。
+开工时任务分支和 main 均指向 c7c7aaf；GitHub 连接器只读核对远程 main 为相同提交，远程尚无本任务分支。运行环境没有 environment_status 工具或 /etc/codex/network-policy.json，不作网络/凭据 readiness 已通过的判断。
 
-检查原始错误：
+工作区 .git 为只读挂载，git add 无法创建 index.lock；采用 /tmp 下可写隔离 clone，复制并提交且仅提交上述 3 文件，保持父提交和任务分支。原始工作区的 main、origin、Git 元数据及开工时既有 __pycache__ 不变。
 
-```text
-curl: (6) Could not resolve host: github.com
-```
+已实际执行 git push --set-upstream origin codex/v1-tdx-information-r1 和 gh pr create：前者报 Could not resolve host: github.com，后者报 error connecting to api.github.com。已连接 GitHub 应用可读取仓库且报告 push 权限，但 create_tree 写入被工具拒绝：MCP tool call requires approval, but approval policy is never。未修改网络/凭据设置、未读取凭据文件或绕过审批。远程分支/PR 未创建，不声称已有 PR URL；本地提交、补丁、bundle 和 PR 正文保存于 /tmp，具体路径见最终总结。
 
-```text
-github.com
-  X Failed to log in to github.com account zzttcc3321-create (/home/ubuntu/.config/gh/hosts.yml)
-  - Active account: true
-  - The token in /home/ubuntu/.config/gh/hosts.yml is invalid.
-  - To re-authenticate, run: gh auth refresh -h github.com
-  - To forget about this account, run: gh auth logout -h github.com -u zzttcc3321-create
-```
-
-收尾发现当前工作区 `.git` 为只读挂载，原始错误：
+## CODE_REVIEW_PACKAGE_A（#006-R1）
 
 ```text
-fatal: Unable to create '/home/ubuntu/work/AI-STOCK-SYSTEM-V1/.git/index.lock': Read-only file system
-```
-
-采用 `/tmp/ai-stock-task-006` 可写隔离副本完成提交：从当前本地仓库 clone，保持 task 分支和父提交 d2643f8，复制且仅复制四个允许文件。原始仓库的 main、origin 和 Git 元数据均未改变。副本本地读取来源命名为 workspace，新建 origin 指向原有 GitHub URL；没有删除或改写已有 origin。最终提交和 PR 命令从该副本执行。
-
-收尾 §3b 只允许本任务三个新文件及 `providers/__init__.py` 一行 import。测试全部注入 TEST_KEY_ONLY 和 mock transport，禁止 socket 连接；真实 Key 不读取、不写文件、不进 Git。不修改 origin。push/PR 的实际结果以最终任务总结原始输出为准，不预先声称已建 PR 或 CI 通过。
-
-## CODE_REVIEW_PACKAGE_A
-
-```text
-TASK_ID=AI-STOCK-V1-WORKBUDDY-006
-BRANCH=codex/v1-tdx-information
-FILES_CHANGED=providers/tdx_information.py, tests/test_tdx_information.py,
-              docs/TDX_INFORMATION_PROVIDER.md, providers/__init__.py (+1 import)
-CODE_DIFF_SUMMARY=只读云端 MCP、原始证据与 sidecar、信息职责白名单、当日有界去重、离线故障覆盖
-TEST_RESULTS=PASS，130/130（既有79个 + 新增51个），全量socket守卫下运行
-STATIC_ANALYSIS_RESULT=PASS，git diff --check、AST语法检查、允许文件边界与敏感文件/值目检
+TASK_ID=#006-R1
+TASK_TYPE=POST_MERGE_REMEDIATION
+ROOT_CAUSE=REAL_SCHEMA_DIFFERED_FROM_MOCK_ASSUMPTION
+CHANGE_SCOPE=providers/tdx_information.py, tests/test_tdx_information.py,
+             docs/TDX_INFORMATION_PROVIDER.md（仅此3文件）
+CODE_DIFF_SUMMARY=按工具校验并转换真实参数；stock_id唯一身份源；symbol统一并移除stock_code；
+  setcode_code确定性生成及严格date；macro query透传；F10仅4个view映射且固定entry/fixedTag
+STATIC_ANALYSIS_RESULT=PASS，git diff --check、AST解析、允许文件及凭据/职责边界检查
+TEST_RESULT=PASS，154/154（原130项+新增24项），mock transport，全量socket守卫，合成环境Key
+IMPACT_ANALYSIS=外部信息工具请求参数修复；缓存和Evidence绑定转换后的wire参数；
+  接口迁移：F10使用view，macro使用query，listening使用date；数据库/行情/bridge无变更
 DATABASE_MODIFIED=NO
 AWS_MODIFIED=NO
 SECRETS_CHANGED=NO
-IMPACT_ANALYSIS=不改冻结模块/职责；本地新增文件输出；单进程有界缓存
-KNOWN_LIMITATIONS=PUBLIC_OFFICIAL_DOC_VERIFIED=PARTIAL；本次无真实 endpoint 验证；
-  工具参数schema/真实F10子接口尚未获离线官方证据，当前F10词汇仅为本地保守白名单；
-  canonical信息标准化未扩展；仅有限SSE；缓存非跨进程幂等；超大响应只保留前缀；
-  真实负载RSS未测；GitHub网络/认证受阻，远程PR/CI待实际成功后确认
+ARCHITECTURE_CHANGE=NO
+SOURCE_COUNT_CHANGE=NO
+LOGICAL_SOURCE=WORKBUDDY_TDX_MCP
+ACTUAL_PROVIDER_SERVICE=TDX_OFFICIAL_CLOUD_MCP
+RISK_FOUND=真实endpoint验收由阿七独立完成；本轮无真实raw Evidence；
+  PUBLIC_OFFICIAL_DOC_VERIFIED仍为PARTIAL；canonical信息标准化及缓存运行限制沿用#006
 ```
 
-COMMIT 与 PR URL 由最终总结给出；A 部分不代替 GPT Review B、阿七人工审或 qi 合并批准。
+A 部分为代码事实；GPT Review B、阿七人工审查、真实接口验证与 qi 批准合并仍由相应负责人完成。
