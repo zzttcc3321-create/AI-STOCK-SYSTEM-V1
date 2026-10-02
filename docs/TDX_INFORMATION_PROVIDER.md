@@ -37,7 +37,7 @@ FOURTH_SOURCE_FORBIDDEN=YES
 
 ## 父任务 #006 的前置验证记录与证据边界（原文）
 
-以下为任务卡提供的前置验证记录，不是本次执行重新实测。本次仅使用合成数据和 mock transport，未访问真实 MCP endpoint。
+以下为任务卡提供的前置验证记录，不是本次执行重新实测。初始 Codex 执行阶段仅使用合成数据和 mock transport，未访问真实 MCP endpoint（见下方 FINAL_DEV_BOX_REAL_VERIFY 的最终真实复验记录）。
 
 > 第三个正式数据源 WORKBUDDY_TDX_MCP（information_fundamental 职责：
 > 公告/研报/资讯/宏观/F10/财务）的 Provider 实现。
@@ -316,10 +316,11 @@ SHA-256 仍基于 wire bytes，未改写历史 Evidence。当前 Key 回显的�
 - 新测试统一核对 raw 文件 bytes、原始 SHA-256、sidecar record、契约状态、canonical_data 为空，
   以及返回对象/raw 不含合成测试 Key；原有 Unicode 转义 Key 回显守卫继续通过。
 - 离线测试沿用上述可复现命令：清空进程环境，仅注入 TEST_KEY_ONLY，测试发现和运行全程禁止真实 socket。
-- 当前工作区未配置 TDX_MCP_API_KEY；没有 environment_status 工具或 /etc/codex/network-policy.json。
+- [INITIAL_CODEX_RUN] 当前工作区未配置 TDX_MCP_API_KEY；没有 environment_status 工具或 /etc/codex/network-policy.json。
   未读取凭据文件、未访问真实 endpoint、未产生真实接口 Evidence，也未改变网络/凭据配置。
-- 任务卡验收 1–3（F10 四视图、聆听、宏观真实接口）为 NOT_RUN，须在已配置环境变量的 dev-box 继续复验；
+- [INITIAL_CODEX_RUN] 任务卡验收 1–3（F10 四视图、聆听、宏观真实接口）为 NOT_RUN，须在已配置环境变量的 dev-box 继续复验；
   180 项离线 PASS 不替代真实接口验收。测试 fixture 来自任务卡描述，非真实响应捕获。
+- [FINAL_DEV_BOX_REAL_VERIFY] 2026-10-03T00:30+08:00 已在 dev-box 用真实 Key 完成复验：6/6 通过（见下方 CODE_REVIEW_PACKAGE_A 的 REAL_ENDPOINT_VERIFICATION=PASS 记录）。
 - 静态检查 PASS：git diff --check、全部 Python AST、严格 3 文件范围、R1 三个参数/日期函数与六项身份/白名单常量的 AST 比对。
 - 凭据扫描 PASS：49 个跟踪文件的禁入文件名、私钥/AWS/GitHub/OpenAI 常见凭据模式、Python 硬编码凭据赋值检查。
   这是一组本地模式扫描，不能代替配置真实 Key 后的真实 Evidence 扫描；本轮未取得真实 Key。
@@ -344,7 +345,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 /tmp/tdx-r2-delivery/verify_live.py
 `GDP|bad-date|20241231||`，要求服务端业务错误 UNAVAILABLE。可通过 --stock-id / --date / --evidence-root
 指定已批准的只读复验输入与仓库外 Evidence 目录；默认 /tmp/tdx-r2-live-evidence。
 仅输出状态、wire arguments、证据路径及原始哈希，不输出响应正文、环境、鉴权头或会话值。
-缺 Key 的 NOT_RUN 已实际验证；已鉴权的真实运行尚未执行。
+缺 Key 的 NOT_RUN 已实际验证；已鉴权的真实运行已于 2026-10-03T00:30+08:00 执行完成（6/6 通过）。
 
 ## CODE_REVIEW_PACKAGE_A（#006-R2）
 
@@ -367,8 +368,8 @@ ARCHITECTURE_CHANGE=NO
 SOURCE_COUNT_CHANGE=NO
 LOGICAL_SOURCE=WORKBUDDY_TDX_MCP
 ACTUAL_PROVIDER_SERVICE=TDX_OFFICIAL_CLOUD_MCP
-RISK_FOUND=真实接口验收1–3尚未执行（环境无TDX_MCP_API_KEY）；
-  未知无数据文本需真实复验确认；PUBLIC_OFFICIAL_DOC_VERIFIED仍为PARTIAL；
+RISK_FOUND=[已解除]真实接口验收1–3已于2026-10-03T00:30+08:00完成（6/6通过）；
+  未知无数据文本已真实复验确认；PUBLIC_OFFICIAL_DOC_VERIFIED仍为PARTIAL；
   ContractErrorCode沿用粗粒度枚举，分类须读取status/error.message；无自动重试/切源/补填
 REAL_ENDPOINT_VERIFICATION=PASS
 VERIFIED_AT=2026-10-03T00:30+08:00
