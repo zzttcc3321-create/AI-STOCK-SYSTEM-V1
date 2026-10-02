@@ -445,8 +445,12 @@ class TdxInformationProvider(Provider):
             raise _Failure(ProviderStatus.VALIDATION_FAILED)
         _business_error(result)
         empty_notice = False
-        if "structuredContent" in result and isinstance(result["structuredContent"], dict):
-            data = _business_data(result["structuredContent"])
+        sc = result.get("structuredContent")
+        sc_has_business = isinstance(sc, dict) and (
+            "data" in sc or "response" in sc or "ok" in sc or "isError" in sc
+            or "code" in sc or "message" in sc or "msg" in sc or "error" in sc)
+        if sc_has_business:
+            data = _business_data(sc)
         elif "data" in result or "response" in result:
             data = _business_data(result)
         else:
