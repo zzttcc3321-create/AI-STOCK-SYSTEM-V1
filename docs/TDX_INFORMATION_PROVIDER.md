@@ -372,7 +372,7 @@ RISK_FOUND=真实接口验收1–3尚未执行（环境无TDX_MCP_API_KEY）；
   ContractErrorCode沿用粗粒度枚举，分类须读取status/error.message；无自动重试/切源/补填
 REAL_ENDPOINT_VERIFICATION=PASS
 VERIFIED_AT=2026-10-03T00:30+08:00
-VERIFIED_HEAD=pending-final-commit
+VERIFIED_HEAD=0b3e955
 F10_VIEWS=4/4 PASS (profit/balance/cashflow/company all AVAILABLE)
 LISTENING=PASS (NOT_AVAILABLE as expected for no-data date)
 MACRO_ERROR_CLASSIFICATION=PASS (UNAVAILABLE as expected for business error)
