@@ -1,4 +1,4 @@
-"""#011 schema contracts; all SQLite connections are globally restricted to :memory:."""
+"""#011 schema contracts; SQLite guard is scoped to each schema test."""
 
 import ast
 from collections.abc import Mapping
@@ -23,8 +23,22 @@ def memory_only(database, *args, **kwargs):
         raise AssertionError('REAL_DB_CONNECTION=FORBIDDEN')
     return REAL_CONNECT(database, *args, **kwargs)
 
-# Global guard, including all imports and test fixture calls after this point.
-sqlite3.connect = memory_only
+class SQLiteGuardTests(unittest.TestCase):
+    def test_sqlite_connect_restored_after_memory_guard(self):
+        original = sqlite3.connect
+        with patch('sqlite3.connect', side_effect=memory_only):
+            db = sqlite3.connect(':memory:')
+            try:
+                self.assertEqual(db.execute('SELECT 1').fetchone()[0], 1)
+            finally:
+                db.close()
+            with self.assertRaisesRegex(AssertionError, 'FORBIDDEN'):
+                sqlite3.connect('stock_analysis.db')
+        self.assertIs(sqlite3.connect, original)
+        with self.assertRaisesRegex(RuntimeError, 'guard failure'):
+            with patch('sqlite3.connect', side_effect=memory_only):
+                raise RuntimeError('guard failure')
+        self.assertIs(sqlite3.connect, original)
 
 
 from persistence import schema_v1_1 as schema
@@ -46,6 +60,16 @@ WHITELIST = {'docs/frozen/DB_SCHEMA_V1.1.md',
              'docs/PERSISTENCE_READINESS_011.md', 'persistence/schema_v1_1.py',
              'tests/test_persistence_schema_v1_1.py'}
 BASELINE = 'eaa928a2ad99121154563e8ecc660841beee5fcb'
+IMPLEMENTATION_BASELINE = '91c19e524f5456f050813dc17418793163b8f1c4'
+IMPLEMENTATION_WHITELIST = {
+    'migration/003_db_schema_v1_1_additive.sql', 'persistence/__init__.py',
+    'persistence/backup.py', 'persistence/connection.py', 'persistence/contracts.py',
+    'persistence/serialization.py', 'persistence/migration.py', 'persistence/repository.py',
+    'persistence/read_models.py', 'tests/test_persistence_schema_v1_1.py',
+    'tests/test_persistence_backup.py', 'tests/test_persistence_migration.py',
+    'tests/test_persistence_repository.py', 'tests/test_persistence_read_models.py',
+    'docs/PERSISTENCE_IMPLEMENTATION_012.md', 'docs/PERSISTENCE_MIGRATION_RUNBOOK_012.md',
+}
 
 def insert(db, table, row):
     columns = ','.join(row)
@@ -132,6 +156,9 @@ def revision_rows(flow, prepared, final):
 
 class ResumeSchemaTests(unittest.TestCase):
     def setUp(self):
+        guard = patch('sqlite3.connect', side_effect=memory_only)
+        guard.start()
+        self.addCleanup(guard.stop)
         self.db=sqlite3.connect(':memory:')
         self.addCleanup(self.db.close)
         self.db.row_factory=sqlite3.Row
@@ -390,9 +417,16 @@ class ResumeSchemaTests(unittest.TestCase):
         self.assertFalse(re.search(r'\b(DROP|ALTER)\s+(TABLE|INDEX)|\bRENAME\s+TO',schema.TEST_SCHEMA_DDL,re.I))
         original=subprocess.check_output(['git','show',BASELINE+':docs/frozen/DB_SCHEMA_V1.0.md'])
         self.assertEqual(Path('docs/frozen/DB_SCHEMA_V1.0.md').read_bytes(),original)
-        changed=subprocess.check_output(['git','diff',BASELINE,'--name-only']).decode().splitlines()
-        self.assertTrue(set(changed)<=WHITELIST,changed)
-        self.assertFalse(any(Path('migration').glob('*.sql')))
+        # #011 historical scope remains frozen; #012 adds only its approved files.
+        historical=subprocess.check_output(['git','diff',BASELINE,IMPLEMENTATION_BASELINE,'--name-only']).decode().splitlines()
+        self.assertTrue(set(historical)<=WHITELIST,historical)
+        changed=subprocess.check_output(['git','diff',IMPLEMENTATION_BASELINE,'--name-only']).decode().splitlines()
+        self.assertTrue(set(changed)<=IMPLEMENTATION_WHITELIST,changed)
+        self.assertEqual({str(p) for p in Path('migration').glob('*.sql')},
+                         {'migration/003_db_schema_v1_1_additive.sql'})
+        for path in ('persistence/schema_v1_1.py','docs/frozen/DB_SCHEMA_V1.1.md'):
+            self.assertEqual(Path(path).read_bytes(),subprocess.check_output(
+                ['git','show',IMPLEMENTATION_BASELINE+':'+path]))
 
     def test_19_one_prepared_per_report_revision_and_one_final_per_report(self):
         self.commit_fixture()
