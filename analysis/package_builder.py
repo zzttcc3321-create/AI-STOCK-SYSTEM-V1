@@ -9,10 +9,15 @@ from typing import Any, Mapping, Sequence
 from evidence.contracts import EvidenceRecord
 from normalizer.contracts import ConversionRule, NumericField, UnitStatus
 from normalizer.validation import parse_trade_date, validate_daily, validate_quote
+from normalizer.information import validate_information_evidence, validate_information_result
+from normalizer.information_contracts import (
+    SOURCE as INFORMATION_SOURCE, InformationNormalizationError,
+)
 
 from .contracts import (
     AVAILABILITY_STATUSES, INFORMATION_FIELDS, QUALITY_STATUSES, SOURCES,
     AnalysisInputError, AnalysisPackage, safe_json,
+    stable_json,
 )
 
 DAILY_SOURCE = "TUSHARE_MCP"
@@ -184,9 +189,9 @@ def _block(records: list[dict[str, Any]], *, reason: str | None = None,
 class AnalysisPackageBuilder:
     """Accept only named canonical collections, snapshots and Evidence metadata.
 
-    Information fields accept availability declarations only until #008 defines
-    their canonical contracts. ``evidence_links`` addresses every record by
-    ``daily_kline.N`` / ``market_quotes.N`` and identity by ``stock_identity``.
+    Information accepts only sealed #008 gate batches. ``evidence_links``
+    addresses records by ``daily_kline.N`` / ``market_quotes.N`` or information
+    category and index, and identity by ``stock_identity``.
     Holdings are explicit portfolio_positions business input, without Provider
     Evidence. No store or Provider object is accepted or called.
     """
@@ -194,6 +199,7 @@ class AnalysisPackageBuilder:
     def build(
         self, *, stock_identity: Mapping[str, Any],
         canonical_data: Mapping[str, Any] | None = None,
+        canonical_information: Sequence[Any] = (),
         holding_snapshot: Mapping[str, Any] | None = None,
         evidence_metadata: Sequence[Any] = (),
         evidence_links: Mapping[str, Any] | None = None,
@@ -231,14 +237,15 @@ class AnalysisPackageBuilder:
         warnings = _text_set(validation_warnings, "validation_warnings")
         incomplete = []
 
-        def attach(row: dict[str, Any], path: str, source: str | None = None) -> dict[str, Any] | None:
+        def attach(row: dict[str, Any], path: str, source: str | None = None,
+                   *, information_result: Any = None) -> dict[str, Any] | None:
             addressed.add(path)
             identifiers = _sequence(links.get(path, []), "evidence links")
             for identifier in identifiers:
                 _text(identifier, "evidence reference")
             identifiers = sorted(set(identifiers))
             matched = [evidence[identifier] for identifier in identifiers if identifier in evidence]
-            if any(item["validation_result"]["status"] == "FAIL" for item in matched):
+            if information_result is None and any(item["validation_result"]["status"] == "FAIL" for item in matched):
                 raise AnalysisInputError("FAILED evidence cannot support business input")
             if source is not None and any(item["source"] != source for item in matched):
                 raise AnalysisInputError("evidence source does not match canonical source")
@@ -246,6 +253,13 @@ class AnalysisPackageBuilder:
                 missing.add(f"{path}.evidence")
                 incomplete.append(f"{path}: evidence missing or not validated; data excluded")
                 return None
+            if information_result is not None:
+                typed = {item.evidence_id: item for item in evidence_metadata if isinstance(item, EvidenceRecord)}
+                for identifier in identifiers:
+                    try:
+                        validate_information_evidence(information_result, typed.get(identifier))
+                    except InformationNormalizationError as exc:
+                        raise AnalysisInputError(str(exc)) from None
             used.update(identifiers)
             return {"data": row, "evidence_ids": identifiers}
 
@@ -305,22 +319,60 @@ class AnalysisPackageBuilder:
             blocks[kind] = _block(entries, reason=None if entries else "No evidenced canonical data", absent_status=absent_status)
         if fallback is not None and not any(entry["data"]["provider"] == QUOTE_SOURCE for entry in blocks["daily_kline"]["records"]):
             raise AnalysisInputError("fallback_used must describe retained official daily data")
-        if set(links) - addressed:
-            raise AnalysisInputError("evidence link does not address an input block")
-
         availability = _mapping(information_availability if information_availability is not None else {}, "information_availability")
         if set(availability) - set(INFORMATION_FIELDS):
             raise AnalysisInputError("unknown information category")
+        if not isinstance(canonical_information, (tuple, list)):
+            raise AnalysisInputError("canonical_information must be a sequence of gate batches")
+        batches = {field: [] for field in INFORMATION_FIELDS}
+        for result in canonical_information:
+            try:
+                validate_information_result(result)
+            except InformationNormalizationError as exc:
+                raise AnalysisInputError(str(exc)) from None
+            if result.provenance["stock_id"] != stock_id:
+                raise AnalysisInputError("information stock identity mismatch")
+            batches[result.category].append(result)
         information = {}
         for field in INFORMATION_FIELDS:
-            declaration = availability.get(field, {"status": "MISSING", "reason": "Information canonicalization pending (#008)"})
+            entries, unique, number = [], set(), 0
+            has_records = any(result.canonical_data for result in batches[field])
+            if has_records and sources[INFORMATION_SOURCE] not in QUALITY_STATUSES:
+                raise AnalysisInputError("information contradicts its source availability")
+            if has_records and field in availability:
+                raise AnalysisInputError("canonical information conflicts with missing availability")
+            for result in batches[field]:
+                for row in result.canonical_data:
+                    row = _mapping(row, "canonical information record")
+                    path = f"{field}.{number}"
+                    number += 1
+                    key = sha256(stable_json(row).encode("utf-8")).hexdigest()
+                    if key in unique:
+                        raise AnalysisInputError("duplicate canonical information record")
+                    unique.add(key)
+                    for name, value in row.items():
+                        if value is None:
+                            missing.add(f"{path}.{name}")
+                    warnings.add(f"{path}: {row['data_quality_status']}")
+                    entry = attach(row, path, INFORMATION_SOURCE, information_result=result)
+                    if entry:
+                        entries.append(entry)
+            if has_records:
+                information[field] = _block(entries, reason=None if entries else "No PASS information Evidence")
+                if not entries:
+                    missing.add(field)
+                continue
+            declaration = availability.get(field, {"status": "MISSING", "reason": "No evidenced canonical information"})
             declaration = _mapping(declaration, "information availability")
             if set(declaration) != {"status", "reason"} or _text(declaration["status"], "information availability status") not in {"MISSING", "NOT_AVAILABLE"}:
-                raise AnalysisInputError("information has no existing canonical contract; availability only")
+                raise AnalysisInputError("absent information requires MISSING/NOT_AVAILABLE")
             _text(declaration["reason"], "missing information reason")
             information[field] = _block([], reason=declaration["reason"], absent_status=declaration["status"])
             missing.add(field)
             incomplete.append(f"{field}: {declaration['status']}; {declaration['reason']}")
+
+        if set(links) - addressed:
+            raise AnalysisInputError("evidence link does not address an input block")
 
         for field, block in blocks.items():
             if not block["records"]:

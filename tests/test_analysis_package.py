@@ -1,13 +1,15 @@
 """Offline tests of the canonical business boundary and traceability."""
 
 from copy import deepcopy
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import unittest
 
 from analysis import AnalysisInputError, AnalysisPackageBuilder
 from normalizer import DataNormalizer
 from providers import ProviderEnvelope, ProviderStatus
 from evidence import EvidenceBuilder
+from evidence import EvidenceSource, EvidenceValidationResult, ValidationStatus
+from test_information_normalizer import gate_information
 
 
 STOCK = "601518.SH"
@@ -61,6 +63,152 @@ def package_arguments(*, quote=False, holding=False):
                                      "cost_price": 10.0, "snapshot_time": REQUEST_TIME,
                                      "profit_loss": None, "profit_loss_pct": None}
     return value
+
+
+def information_package_arguments():
+    arguments = package_arguments()
+    arguments["canonical_information"] = []
+    arguments["source_status"]["WORKBUDDY_TDX_MCP"] = "UNVERIFIED"
+    number = 0
+    for tool, view in [("wenda_notice_query", None), ("wenda_news_query", None),
+                       ("wenda_report_query", None), ("tdx_api_data", "profit"),
+                       ("tdx_api_data", "balance"), ("tdx_api_data", "cashflow")]:
+        result, evidence = gate_information(tool, view=view)
+        arguments["canonical_information"].append(result)
+        arguments["evidence_metadata"].append(evidence)
+        index = number if view else 0
+        arguments["evidence_links"][f"{result.category}.{index}"] = [evidence.evidence_id]
+        if view:
+            number += 1
+    return arguments
+
+
+class CanonicalInformationPackageTests(unittest.TestCase):
+    def test_all_six_tool_views_enter_four_supported_blocks(self):
+        package = AnalysisPackageBuilder().build(**information_package_arguments())
+        for field, count in [("recent_announcements", 1), ("recent_news", 1),
+                             ("research_summary", 1), ("financial_summary", 3)]:
+            block = getattr(package, field)
+            self.assertEqual(len(block["records"]), count)
+            self.assertEqual(block["status"], "UNVERIFIED")
+            self.assertTrue(all(row["evidence_ids"] for row in block["records"]))
+        for field in ("valuation_summary", "sector_context"):
+            self.assertEqual(getattr(package, field)["status"], "MISSING")
+            self.assertIn(field, package.data_quality["missing_fields"])
+        self.assertEqual(package.data_quality["package_status"], "INCOMPLETE")
+        self.assertEqual(package.data_quality["data_quality_status"], "UNVERIFIED")
+
+    def test_raw_mapping_envelope_and_plain_canonical_rows_rejected(self):
+        result, _ = gate_information()
+        for value in ({"data": []}, [dict(result.canonical_data[0])],
+                      [{"recent_news": result.canonical_data}], [replace(result)]):
+            arguments = package_arguments()
+            arguments["canonical_information"] = value
+            with self.subTest(value=type(value)), self.assertRaises(AnalysisInputError):
+                AnalysisPackageBuilder().build(**arguments)
+
+    def test_missing_fail_or_not_validated_info_evidence_is_excluded(self):
+        for mode in ("missing", "FAIL", "NOT_VALIDATED"):
+            arguments = information_package_arguments()
+            evidence = arguments["evidence_metadata"][2]
+            if mode == "missing":
+                arguments["evidence_metadata"].pop(2)
+            else:
+                arguments["evidence_metadata"][2] = replace(evidence,
+                    validation_result=EvidenceValidationResult(ValidationStatus(mode)))
+            package = AnalysisPackageBuilder().build(**arguments)
+            self.assertEqual(package.recent_news["records"], ())
+            self.assertEqual(package.data_quality["package_status"], "INCOMPLETE")
+            self.assertIn("recent_news.0.evidence", package.data_quality["missing_fields"])
+            self.assertNotIn(evidence.evidence_id, [item["evidence_id"] for item in package.evidence_index])
+
+    def test_six_field_pass_metadata_cannot_replace_typed_information_evidence(self):
+        arguments = information_package_arguments()
+        evidence = arguments["evidence_metadata"][2]
+        arguments["evidence_metadata"][2] = metadata(evidence.evidence_id, "WORKBUDDY_TDX_MCP")
+        with self.assertRaises(AnalysisInputError):
+            AnalysisPackageBuilder().build(**arguments)
+
+    def test_wrong_information_evidence_source_rejected(self):
+        arguments = information_package_arguments()
+        arguments["evidence_metadata"][2] = replace(arguments["evidence_metadata"][2], source=EvidenceSource.TUSHARE_MCP)
+        with self.assertRaises(AnalysisInputError):
+            AnalysisPackageBuilder().build(**arguments)
+
+    def test_information_evidence_identity_tool_and_hashes_bound(self):
+        for mode in ("stock", "tool", "hash", "raw_hash", "original", "clock", "path"):
+            arguments = information_package_arguments()
+            evidence = arguments["evidence_metadata"][2]
+            changes = {}
+            if mode == "stock": changes["request_params"] = {**evidence.request_params, "stock_id": "000001.SZ"}
+            if mode == "tool": changes["endpoint_or_tool"] = "wenda_notice_query"
+            if mode == "hash": changes["normalized_data_hash"] = "0" * 64
+            if mode == "raw_hash": changes["raw_response_hash"] = "0" * 64
+            if mode == "original": changes["supersedes_evidence_id"] = "unrelated"
+            if mode == "clock": changes["request_timestamp"] = "2026-10-03T12:00:00+08:00"
+            if mode == "path": changes["raw_response_path"] = "run008/task008/other/raw.json"
+            arguments["evidence_metadata"][2] = replace(evidence, **changes)
+            with self.subTest(mode=mode), self.assertRaises(AnalysisInputError):
+                AnalysisPackageBuilder().build(**arguments)
+
+    def test_news_evidence_cannot_support_notice(self):
+        arguments = information_package_arguments()
+        arguments["evidence_links"]["recent_announcements.0"] = arguments["evidence_links"]["recent_news.0"]
+        with self.assertRaises(AnalysisInputError):
+            AnalysisPackageBuilder().build(**arguments)
+
+    def test_canonical_validation_cannot_reuse_original_evidence_id(self):
+        arguments = information_package_arguments()
+        evidence = arguments["evidence_metadata"][2]
+        identifier = evidence.supersedes_evidence_id
+        arguments["evidence_metadata"][2] = replace(evidence, evidence_id=identifier)
+        arguments["evidence_links"]["recent_news.0"] = [identifier]
+        with self.assertRaises(AnalysisInputError):
+            AnalysisPackageBuilder().build(**arguments)
+
+    def test_each_information_record_requires_its_batch_evidence(self):
+        arguments = information_package_arguments()
+        arguments["evidence_links"].pop("financial_summary.1")
+        package = AnalysisPackageBuilder().build(**arguments)
+        self.assertEqual(len(package.financial_summary["records"]), 2)
+        self.assertIn("financial_summary.1.evidence", package.data_quality["missing_fields"])
+
+    def test_populated_information_and_missing_declaration_conflict(self):
+        for field in ("recent_announcements", "recent_news", "research_summary", "financial_summary"):
+            for status in ("MISSING", "NOT_AVAILABLE"):
+                arguments = information_package_arguments()
+                arguments["information_availability"] = {field: {"status": status, "reason": "unavailable"}}
+                with self.subTest(field=field, status=status), self.assertRaises(AnalysisInputError):
+                    AnalysisPackageBuilder().build(**arguments)
+
+    def test_information_source_missing_or_fourth_source_rejected(self):
+        for mode in ("missing", "fourth"):
+            arguments = information_package_arguments()
+            if mode == "missing": arguments["source_status"]["WORKBUDDY_TDX_MCP"] = "MISSING"
+            else: arguments["source_status"]["FOURTH_SOURCE"] = "PASS"
+            with self.assertRaises(AnalysisInputError):
+                AnalysisPackageBuilder().build(**arguments)
+
+    def test_stock_identity_must_match_information(self):
+        arguments = information_package_arguments()
+        arguments["stock_identity"]["stock_id"] = "000001.SZ"
+        arguments["canonical_data"] = {}
+        arguments["evidence_links"].pop("daily_kline.0")
+        with self.assertRaises(AnalysisInputError):
+            AnalysisPackageBuilder().build(**arguments)
+
+    def test_empty_gate_keeps_category_missing(self):
+        arguments = package_arguments()
+        result, _ = gate_information(data=[])
+        arguments["canonical_information"] = [result]
+        package = AnalysisPackageBuilder().build(**arguments)
+        self.assertEqual(package.recent_news["status"], "MISSING")
+
+    def test_duplicate_canonical_info_is_rejected(self):
+        arguments = information_package_arguments()
+        arguments["canonical_information"].append(arguments["canonical_information"][1])
+        with self.assertRaises(AnalysisInputError):
+            AnalysisPackageBuilder().build(**arguments)
 
 
 class AnalysisPackageTests(unittest.TestCase):
