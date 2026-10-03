@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import fields, is_dataclass
 from datetime import date, datetime
 from typing import Any, Mapping
 
@@ -21,6 +22,7 @@ from .contracts import DataQualityStatus, NormalizedRecord, ValidationResult
 from .information_contracts import (
     FINANCIAL_METRICS, SOURCE, STATEMENT_ENTRIES, TOOL_CATEGORIES, TOOL_KINDS,
     InformationNormalizationError, InformationNormalizationResult, freeze_information,
+    InformationNormalizationRule, InformationRuleId,
 )
 
 
@@ -151,9 +153,42 @@ def _financial(data: Any, stock: str, view: str) -> list[dict]:
     return records
 
 
+def _seal_value(value: Any) -> Any:
+    """Serialize frozen dataclasses without deepcopying their mapping proxies."""
+    if is_dataclass(value):
+        return {field.name: _seal_value(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, Mapping):
+        return {key: _seal_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return tuple(_seal_value(item) for item in value)
+    return value
+
+
 def _digest(result: InformationNormalizationResult) -> str:
-    return sha256_digest({"category": result.category, "canonical_data": result.canonical_data,
-                          "provenance": result.provenance})
+    return sha256_digest(_seal_value({"category": result.category,
+                          "canonical_data": result.canonical_data,
+                          "normalized_data": result.normalized_data,
+                          "provenance": result.provenance}))
+
+
+def _normalization_rules(tool: str, view: str | None) -> tuple[InformationNormalizationRule, ...]:
+    rules = [("source_supplied_summary", InformationRuleId.INFO_SOURCE_SUMMARY_EXACT_COPY)]
+    if view:
+        rules.extend([
+            ("report_date", InformationRuleId.FIN_REPORT_DATE_EXACT_ISO_DATE),
+            ("statement_view", InformationRuleId.FIN_STATEMENT_VIEW_EXACT_ENTRY),
+            *((metric, InformationRuleId.FIN_METRIC_UNIT_UNVERIFIED_NULL) for metric in FINANCIAL_METRICS),
+        ])
+    else:
+        research = tool == "wenda_report_query"
+        rules.extend([
+            ("title", InformationRuleId.INFO_TITLE_EXACT_COPY),
+            ("publish_date" if research else "publish_time",
+             InformationRuleId.INFO_PUBLICATION_TIME_UNVERIFIED_NULL),
+        ])
+        if research:
+            rules.append(("institution", InformationRuleId.INFO_INSTITUTION_UNVERIFIED_NULL))
+    return tuple(InformationNormalizationRule(field, rule) for field, rule in rules)
 
 
 def validate_information_result(result: Any) -> None:
@@ -236,6 +271,10 @@ class InformationNormalizer:
             view = STATEMENT_ENTRIES.get(arguments.get("entry"))
             if view is None or arguments.get("code") != stock[:6]:
                 _reject("unsupported financial view or stock mismatch")
+            expected_keys = {"entry", "code"} if view == "balance" else {"entry", "code", "fixedTag"}
+            if (set(arguments) != expected_keys
+                    or view != "balance" and arguments.get("fixedTag") != "00101"):
+                _reject("financial arguments differ from the exact audited wire contract")
         elif "symbol" in arguments:
             if arguments["symbol"] != stock[:6]:
                 _reject("wire stock identity mismatch")
@@ -257,7 +296,8 @@ class InformationNormalizer:
                 or not records and envelope.status != ProviderStatus.NOT_AVAILABLE):
             _reject("information availability contradicts response records")
         canonical = freeze_information(records)
-        normalized = tuple(NormalizedRecord(row, freeze_information({}), (),
+        rules = _normalization_rules(tool, view)
+        normalized = tuple(NormalizedRecord(row, freeze_information({}), rules,
                             ValidationResult(True, DataQualityStatus.UNVERIFIED,
                                              warnings=("Nullable semantics remain UNVERIFIED",)))
                            for row in canonical)

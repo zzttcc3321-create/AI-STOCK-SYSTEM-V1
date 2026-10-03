@@ -126,7 +126,7 @@ JSON/SSE 支持真实 archive 的外层格式；重复键、非有限 JSON、含
 只有明确标题字段和审计过的财务报告期字段可映射，未知字段不会作为别名。
 
 Normalizer 的输出兼容现有 EvidenceBuilder：normalized_data 带通过的验证结果，
-canonical_data 的 `sha256_digest` 成为 normalized_data_hash。Gate PASS 只说明原响应、
+normalization_rule 带稳定的字段/rule ID，canonical_data 的 `sha256_digest` 成为 normalized_data_hash。Gate PASS 只说明原响应、
 映射与绑定通过验证；nullable 时间、机构、指标并未完全确认，记录仍为 UNVERIFIED。
 原 raw sidecar 保持 NOT_VALIDATED / normalized_data_hash=NULL。
 新记录用 supersedes_evidence_id 关联原 evidence_id，保留相同 raw_path/raw_hash，
@@ -187,14 +187,14 @@ inputs = PromptBuilder().inputs(package)
 ## 验收
 
 基线独立执行：`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests`，249/249 PASS。
-最终相同命令：287/287 PASS（原 249 项 + 新增 38 项）。`git diff --check` PASS。
+初版相同命令：287/287 PASS；增量返修后：290/290 PASS（原 249 项 + 新增 41 项）。`git diff --check` PASS。
 测试覆盖错误 source/股票/tool/hash/时钟/原证据关联、缺 publication、不推导财务指标、
 raw 绕行、敏感源摘要、不可变对象、PASS Evidence 限制、冲突与禁止类别，以及零外部调用。
 
 | 编号 | 验收 | 结果 |
 | --- | --- | --- |
 | 1 | #007 基线继续通过 | PASS，249/249 保留 |
-| 2 | #008 新增测试 | PASS，38/38 |
+| 2 | #008 新增测试 | PASS，41/41（含返修新增 3 项） |
 | 3 | notice 真实转 recent_announcements | PASS，5 条 |
 | 4 | news 真实转 recent_news | PASS，5 条 |
 | 5 | report 真实转 research_summary | PASS，5 条，publish_date/institution/rating=NULL |
@@ -231,3 +231,34 @@ PACKAGE_STATUS=INCOMPLETE
 
 仓库变更仅限任务卡白名单的八个文件；providers、bridge、evidence、冻结文档与 schema 均未修改。
 已有未跟踪的 __pycache__ 目录保留，不作为本任务代码变更。
+
+## GPT Review B 增量返修验收
+
+BLOCKER-008-01：`InformationRuleId` 枚举七个稳定 ID，每条 normalized record
+携带适用的字段/rule 元数据。现有 EvidenceBuilder 将其写为 `field:rule_id`，
+不改 evidence 模块；六类最终 EvidenceRecord 均直接验收规则集合、canonical hash 和 PASS。
+
+- `INFO_TITLE_EXACT_COPY`：标题逐字复制。
+- `INFO_PUBLICATION_TIME_UNVERIFIED_NULL`：未确认的发布时间保持 NULL。
+- `INFO_SOURCE_SUMMARY_EXACT_COPY`：源自带摘要原样保留，不生成或改写。
+- `INFO_INSTITUTION_UNVERIFIED_NULL`：研报机构保持 NULL，不把来源当机构。
+- `FIN_REPORT_DATE_EXACT_ISO_DATE`：报告期必须为源字段中的精确 ISO 日期。
+- `FIN_METRIC_UNIT_UNVERIFIED_NULL`：七个财务指标的单位/口径未验证，保持 NULL。
+- `FIN_STATEMENT_VIEW_EXACT_ENTRY`：三表 entry 精确匹配。
+
+BLOCKER-008-02：seal 摘要覆盖 category、canonical_data、normalized_data、provenance。
+normalized_data 的所有 dataclass 字段参与摘要，序列化不 deepcopy 只读 mapping proxy。
+`test_normalized_data_forced_mutation_breaks_gate` 验证强制删除记录或修改 values、
+numeric_fields、normalization_rule、validation_result 均被 gate 拒绝。
+
+H1：profit/cashflow 精确参数集合为 entry/code/fixedTag，fixedTag 必须为字符串 `00101`；
+balance 仅接受 entry/code，拒绝 fixedTag。回归覆盖缺参数、多参数、错误值与类型。
+
+返修真实 replay：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 /tmp/verify_information_008_repair.py`。
+产物：`/tmp/tdx-008-acceptance/c4361b4a716d46f4adff68f4fc9badd7/`。
+notice/news/report/profit/balance/cashflow 全部 PASS，记录数为 5/5/5/24/23/23，共 85 条。
+每组新 Evidence 的 normalization_rule 非 NULL、normalized_data_hash 非 NULL、validation_result=PASS，
+并核对适用规则的精确集合。原始文件哈希不变，Prompt 无 raw/凭据，包仍为 INCOMPLETE。
+返修只修改白名单内四个文件，不新增测试文件；不执行模型、不部署、不写数据库。
+`git diff --check` 和白名单核对 PASS。四个变更文件及十五份新 replay JSON 的凭据模式扫描
+均为零命中；不读取或写入真实 Key。

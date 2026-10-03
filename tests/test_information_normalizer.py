@@ -9,7 +9,9 @@ import unittest
 from evidence import EvidenceBuilder, EvidenceValidationResult, ValidationStatus, sha256_digest
 from normalizer import InformationNormalizer, InformationNormalizationError
 from normalizer.information import validate_information_result
-from normalizer.information_contracts import FINANCIAL_METRICS, STATEMENT_ENTRIES, TOOL_KINDS
+from normalizer.information_contracts import (
+    FINANCIAL_METRICS, STATEMENT_ENTRIES, TOOL_KINDS, InformationRuleId,
+)
 from providers import ProviderEnvelope, ProviderStatus
 from providers.tdx_information import TdxInformationProvider
 
@@ -23,6 +25,8 @@ def information_input(tool="wenda_news_query", *, view=None, data=None, wire="js
     arguments = {"symbol": STOCK[:6]}
     if view:
         arguments = {"code": STOCK[:6], "entry": next(key for key, value in STATEMENT_ENTRIES.items() if value == view)}
+        if view != "balance":
+            arguments["fixedTag"] = "00101"
     if data is None:
         if view:
             data = {"transformed": {"parser": "statements", "summary": "源提供财报概况",
@@ -66,6 +70,73 @@ def gate_information(tool="wenda_news_query", *, view=None, data=None, wire="jso
 
 
 class InformationNormalizerTests(unittest.TestCase):
+    def test_final_evidence_carries_exact_information_rule_ids(self):
+        summary = "source_supplied_summary:INFO_SOURCE_SUMMARY_EXACT_COPY"
+        information = {summary, "title:INFO_TITLE_EXACT_COPY"}
+        financial = {summary, "report_date:FIN_REPORT_DATE_EXACT_ISO_DATE",
+                     "statement_view:FIN_STATEMENT_VIEW_EXACT_ENTRY",
+                     *(f"{metric}:FIN_METRIC_UNIT_UNVERIFIED_NULL" for metric in FINANCIAL_METRICS)}
+        samples = [(tool, None) for tool in ("wenda_notice_query", "wenda_news_query", "wenda_report_query")]
+        samples += [("tdx_api_data", view) for view in ("profit", "balance", "cashflow")]
+        observed_ids = set()
+        for tool, view in samples:
+            with self.subTest(tool=tool, view=view):
+                result, evidence = gate_information(tool, view=view)
+                expected = set(financial if view else information)
+                if not view:
+                    publication = "publish_date" if tool == "wenda_report_query" else "publish_time"
+                    expected.add(f"{publication}:INFO_PUBLICATION_TIME_UNVERIFIED_NULL")
+                    if tool == "wenda_report_query":
+                        expected.add("institution:INFO_INSTITUTION_UNVERIFIED_NULL")
+                self.assertIsNotNone(evidence.normalization_rule)
+                self.assertEqual(set(evidence.normalization_rule), expected)
+                self.assertIsNotNone(evidence.normalized_data_hash)
+                self.assertEqual(evidence.normalized_data_hash, sha256_digest(result.canonical_data))
+                self.assertEqual(evidence.validation_result.status, ValidationStatus.PASS)
+                observed_ids.update(rule.split(":", 1)[1] for rule in evidence.normalization_rule)
+        self.assertEqual(observed_ids, {rule.value for rule in InformationRuleId})
+
+    def test_normalized_data_forced_mutation_breaks_gate(self):
+        for mode in ("remove", "values", "numeric_fields", "normalization_rule", "validation_result"):
+            with self.subTest(mode=mode):
+                result, _ = gate_information()
+                validate_information_result(result)
+                record = result.normalized_data[0]
+                mutations = {
+                    "values": {**record.values, "title": "forced mutation"},
+                    "numeric_fields": {"unexpected": None},
+                    "normalization_rule": (),
+                    "validation_result": replace(record.validation_result, passed=False),
+                }
+                changed = () if mode == "remove" else (replace(record, **{mode: mutations[mode]}),)
+                object.__setattr__(result, "normalized_data", changed)
+                with self.assertRaisesRegex(InformationNormalizationError, "unchanged InformationNormalizer"):
+                    validate_information_result(result)
+
+    def test_financial_arguments_require_exact_keys_and_fixed_tag(self):
+        for view in ("profit", "balance", "cashflow"):
+            envelope, original, raw = information_input("tdx_api_data", view=view)
+            good = envelope.payload["arguments"]
+            InformationNormalizer().normalize(envelope, source_evidence=original, raw_bytes=raw)
+            bad = [{**good, "extra": "unrecognized"},
+                   {key: value for key, value in good.items() if key != "entry"},
+                   {key: value for key, value in good.items() if key != "code"},
+                   {**good, "code": "000001"},
+                   {**good, "entry": good["entry"] + "_alias"}]
+            if view == "balance":
+                bad += [{**good, "fixedTag": value} for value in ("00101", None)]
+            else:
+                bad += [{key: value for key, value in good.items() if key != "fixedTag"}]
+                bad += [{**good, "fixedTag": value} for value in ("00102", 101, None)]
+            for arguments in bad:
+                with self.subTest(view=view, arguments=arguments):
+                    params = {**original.request_params,
+                              "params": {"name": "tdx_api_data", "arguments": arguments}}
+                    changed = replace(envelope, payload={**envelope.payload, "arguments": arguments})
+                    with self.assertRaises(InformationNormalizationError):
+                        InformationNormalizer().normalize(changed,
+                            source_evidence=replace(original, request_params=params), raw_bytes=raw)
+
     def test_notice_news_report_are_separate_explicit_categories(self):
         for tool, category in [("wenda_notice_query", "recent_announcements"),
                                ("wenda_news_query", "recent_news"),

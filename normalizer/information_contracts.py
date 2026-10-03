@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -29,6 +30,26 @@ STATEMENT_ENTRIES = {
 FINANCIAL_METRICS = (
     "revenue", "net_profit", "cash_flow", "total_asset", "total_liability", "roe", "eps",
 )
+
+
+class InformationRuleId(str, Enum):
+    """Stable IDs for the deterministic mappings audited in #008."""
+
+    INFO_TITLE_EXACT_COPY = "INFO_TITLE_EXACT_COPY"
+    INFO_PUBLICATION_TIME_UNVERIFIED_NULL = "INFO_PUBLICATION_TIME_UNVERIFIED_NULL"
+    INFO_SOURCE_SUMMARY_EXACT_COPY = "INFO_SOURCE_SUMMARY_EXACT_COPY"
+    INFO_INSTITUTION_UNVERIFIED_NULL = "INFO_INSTITUTION_UNVERIFIED_NULL"
+    FIN_REPORT_DATE_EXACT_ISO_DATE = "FIN_REPORT_DATE_EXACT_ISO_DATE"
+    FIN_METRIC_UNIT_UNVERIFIED_NULL = "FIN_METRIC_UNIT_UNVERIFIED_NULL"
+    FIN_STATEMENT_VIEW_EXACT_ENTRY = "FIN_STATEMENT_VIEW_EXACT_ENTRY"
+
+
+@dataclass(frozen=True, slots=True)
+class InformationNormalizationRule:
+    """Field/rule metadata consumed by the existing EvidenceBuilder."""
+
+    field: str
+    rule: InformationRuleId
 
 
 class InformationNormalizationError(ValueError):
