@@ -13,12 +13,67 @@ class ConfirmationReadRepository:
     def __init__(self, db):
         self.db = db
 
+    def _scopes(self):
+        # Events/PREPARED can identify a report before a FINAL report exists.
+        return rows(self.db, "SELECT id AS analysis_report_id,revision_id,task_id AS analysis_run_id "
+                    "FROM analysis_reports UNION SELECT analysis_report_id,revision_id,analysis_run_id "
+                    "FROM analysis_snapshots UNION SELECT analysis_report_id,revision_id,analysis_run_id "
+                    "FROM analysis_confirmation_events UNION SELECT analysis_report_id,revision_id,analysis_run_id "
+                    "FROM analysis_human_overrides")
+
+    def confirmation_history(self, report_id):
+        return self.current_confirmation_state(report_id)
+
+    def current_confirmation_state(self, report_id):
+        text(report_id)
+        scopes = [s for s in self._scopes() if s["analysis_report_id"] == report_id]
+        if not scopes:
+            return self._missing("REPORT_NOT_FOUND", report_id, None)
+        require(len(scopes) == 1, "REPORT_REVISION_AMBIGUOUS")
+        return self.confirmation_state(report_id, scopes[0]["revision_id"])
+
+    def _missing(self, status, report_id, revision_id):
+        return {"status": status, "analysis_report_id": report_id, "revision": revision_id,
+                "generated_confirm_state": "UNKNOWN", "current_confirm_state": "UNKNOWN",
+                "states": [], "events": [], "overrides": [], "required_items": None,
+                "record_origin": "V1_1_PERSISTENCE"}
+
+    def pending_confirmations(self, stock_id):
+        text(stock_id)
+        tasks = rows(self.db, "SELECT id FROM analysis_tasks WHERE stock_id=?", (stock_id,))
+        task_ids = {t["id"] for t in tasks}
+        scopes = [s for s in self._scopes() if s["analysis_run_id"] in task_ids]
+        states = [self.confirmation_state(s["analysis_report_id"], s["revision_id"]) for s in scopes]
+        unresolved = sorted(task_ids - {s["analysis_run_id"] for s in scopes})
+        # Initial review plans have no physical carrier before PREPARED. Never
+        # present an empty pending list as a complete or confirmed projection.
+        complete = not unresolved and all(s["required_items"] is not None for s in states)
+        return {"status": "OK" if complete else "CONFIRMATION_PLAN_UNAVAILABLE",
+                "stock_id": stock_id, "unresolved_task_ids": unresolved,
+                "pending": [s for s in states if s["current_confirm_state"] != "CONFIRMED"],
+                "record_origin": "V1_1_PERSISTENCE"}
+
     def confirmation_state(self, analysis_report_id, revision_id):
         text(analysis_report_id)
         text(revision_id)
+        scopes = [s for s in self._scopes() if s["analysis_report_id"] == analysis_report_id]
+        if not scopes:
+            return self._missing("REPORT_NOT_FOUND", analysis_report_id, revision_id)
+        selected = [s for s in scopes if s["revision_id"] == revision_id]
+        if not selected:
+            return self._missing("REVISION_NOT_FOUND", analysis_report_id, revision_id)
+        require(len(selected) == 1, "EVENT_BINDING_INVALID")
         events = rows(self.db, "SELECT * FROM analysis_confirmation_events WHERE analysis_report_id=? "
                       "AND revision_id=? ORDER BY event_sequence", (analysis_report_id, revision_id))
         states = replay_events(events)
+        require(all(e["analysis_run_id"] == selected[0]["analysis_run_id"] for e in events),
+                "EVENT_BINDING_INVALID")
+        overrides = rows(self.db, "SELECT * FROM analysis_human_overrides WHERE analysis_report_id=? "
+                         "AND revision_id=? ORDER BY override_id", (analysis_report_id, revision_id))
+        for override in overrides:
+            require(override["analysis_run_id"] == selected[0]["analysis_run_id"], "OVERRIDE_BINDING_INVALID")
+            for key in ("replacement", "referenced_evidence_ids"):
+                override[key] = loads(override[key])
         final = rows(self.db, "SELECT payload_json FROM analysis_snapshots WHERE analysis_report_id=? "
                      "AND revision_id=? AND snapshot_kind='FINAL'", (analysis_report_id, revision_id))
         generated = "PENDING"
@@ -37,10 +92,33 @@ class ConfirmationReadRepository:
                 current = "REJECTED"
         else:
             current = states.get(("FINAL_REPORT", "REVIEW_FINAL_REPORT"), "PENDING")
-        return {"analysis_report_id": analysis_report_id, "revision": revision_id,
+            if any(state == "REJECTED" for state in states.values()):
+                current = "REJECTED"
+        candidates = rows(self.db, "SELECT * FROM analysis_snapshots WHERE analysis_report_id=? "
+                          "AND revision_id=? ORDER BY snapshot_kind", (analysis_report_id, revision_id))
+        required = None
+        if candidates:
+            stored = candidates[0]
+            plan = loads(stored["payload_json"])
+            content = dict(plan)
+            hash_key = "final_snapshot_hash" if stored["snapshot_kind"] == "FINAL" else "prepared_snapshot_hash"
+            require(content.pop(hash_key) == digest(content) == stored["snapshot_hash"] and
+                    plan["analysis_report_id"] == analysis_report_id and plan["revision_id"] == revision_id and
+                    plan["analysis_run_id"] == selected[0]["analysis_run_id"], "SNAPSHOT_HASH_INVALID")
+            required = [{"target": d["target"], "reason_code": d["reason_code"],
+                         "details": d.get("details", {}), "required": d.get("required", True)}
+                        for d in plan["confirmation_decisions"] if d["target"] != "FINAL_REPORT"]
+            required += [{"target": "FINAL_REPORT", "reason_code": "REVIEW_FINAL_REPORT", "required": True}]
+            required += [{"target": "HUMAN_OVERRIDE:" + o["override_id"],
+                          "reason_code": "REVIEW_OVERRIDE", "required": True} for o in overrides]
+            for item in required:
+                item["current_state"] = states.get((item["target"], item["reason_code"]), "PENDING")
+        return {"status": "OK" if required is not None else "CONFIRMATION_PLAN_UNAVAILABLE",
+                "analysis_report_id": analysis_report_id, "revision": revision_id,
                 "generated_confirm_state": generated, "current_confirm_state": current,
                 "states": [{"target": target, "reason_code": reason, "current_state": state}
                            for (target, reason), state in states.items()], "events": events,
+                "overrides": overrides, "required_items": required,
                 "record_origin": "V1_1_PERSISTENCE"}
 
 
@@ -78,6 +156,32 @@ class EvidenceReadRepository:
                 "used_evidence_ids": used, "evidence": [self.evidence(i) for i in inputs],
                 "evidence_completeness": "PARTIAL_DB_PROJECTION", **EVIDENCE_LIMITATIONS}
 
+    def field_evidence_trace(self, report_id, field):
+        text(report_id)
+        text(field)
+        reports = AnalysisReadRepository(self.db)._reports()
+        report = next((r for r in reports if r["id"] == report_id), None)
+        if report is None:
+            return {"status": "REPORT_NOT_FOUND", "analysis_report_id": report_id,
+                    "field": field, "evidence": [], **EVIDENCE_LIMITATIONS}
+        analysis = AnalysisReadRepository(self.db)._project(report)
+        require(field in analysis["seven_fields"], "ANALYSIS_FIELD_INVALID")
+        value = analysis["seven_fields"][field]
+        projection = self.for_analysis(report_id)
+        model_used = list(value["AI_ORIGINAL"]["evidence_ids"])
+        override = value["HUMAN_OVERRIDE"]
+        human_refs = [] if override is None else list(override["referenced_evidence_ids"])
+        require(set(model_used) <= set(projection["used_evidence_ids"]) and
+                set(human_refs) <= set(projection["input_evidence_ids"]), "EVIDENCE_BINDING_INVALID")
+        ids = list(dict.fromkeys(model_used + human_refs))
+        evidence = [self.evidence(i) for i in ids]
+        return {"status": "OK" if all(e is not None for e in evidence) else "EVIDENCE_MISSING",
+                "analysis_report_id": report_id, "field": field, "field_value": value,
+                "input_evidence_ids": projection["input_evidence_ids"],
+                "model_used_evidence_ids": model_used, "human_reference_evidence_ids": human_refs,
+                "human_reference_origin": "HUMAN", "evidence": evidence,
+                "evidence_completeness": "PARTIAL_DB_PROJECTION", **EVIDENCE_LIMITATIONS}
+
     def current_effective_evidence(self, evidence_id):
         text(evidence_id)
         records = {r["id"]: r for r in rows(self.db, "SELECT id,supersedes_evidence_id FROM evidence_records")}
@@ -108,10 +212,25 @@ class EvidenceReadRepository:
             node = successors[0]
 
 
-def revision_chain(reports, stock_id):
+def revision_chain(reports, stock_id, *, report_id=None):
     """Pure graph check, independently testable even for corrupt external data."""
     index = {r["id"]: r for r in reports}
     relevant = [r for r in reports if r["stock_id"] == stock_id]
+    if report_id is not None:
+        if report_id not in index:
+            return {"status": "REPORT_NOT_FOUND", "CURRENT_EFFECTIVE_REVISION": None}
+        # Entire connected supersedes component, including siblings. A selected
+        # branch cannot hide another successor, or an invalid cross-stock link.
+        component = {report_id}
+        while True:
+            expanded = component | {r["id"] for r in reports
+                                    if r["supersedes_analysis_report_id"] in component}
+            expanded |= {index[i]["supersedes_analysis_report_id"] for i in component
+                         if index[i]["supersedes_analysis_report_id"] in index}
+            if expanded == component:
+                break
+            component = expanded
+        relevant = [r for r in reports if r["id"] in component]
     children = {}
     for report in relevant:
         predecessor = report["supersedes_analysis_report_id"]
@@ -211,21 +330,35 @@ class AnalysisReadRepository:
         return [{"legacy_record": r, "record_origin": "LEGACY_HISTORY",
                  "evidence_completeness": "LEGACY_UNKNOWN"} for r in rows(self.db, "SELECT * FROM analysis_history")]
 
-    def current_effective_revision(self, stock_id):
+    def current_effective_revision(self, report_id):
+        """Resolve only the supersedes component containing this report."""
+        text(report_id)
+        reports = self._reports()
+        report = next((r for r in reports if r["id"] == report_id), None)
+        if report is None:
+            return {"status": "REPORT_NOT_FOUND", "CURRENT_EFFECTIVE_REVISION": None, "analysis": None}
+        return self._effective(reports, revision_chain(reports, report["stock_id"], report_id=report_id))
+
+    def current_effective_analysis_for_stock(self, stock_id):
         text(stock_id)
-        chain = revision_chain(self._reports(), stock_id)
+        reports = self._reports()
+        return self._effective(reports, revision_chain(reports, stock_id))
+
+    def _effective(self, reports, chain):
         identity = chain["CURRENT_EFFECTIVE_REVISION"]
         if identity is None:
             return {**chain, "analysis": None}
         try:
-            report = next(r for r in self._reports() if r["id"] == identity)
+            report = next(r for r in reports if r["id"] == identity)
             analysis = self._project(report)
         except PersistenceError as exc:
             return {"status": str(exc), "CURRENT_EFFECTIVE_REVISION": None, "analysis": None}
         if analysis["current_confirm_state"] != "CONFIRMED":
-            return {"status": "CURRENT_REVISION_NOT_CONFIRMED", "CURRENT_EFFECTIVE_REVISION": None, "analysis": None}
+            return {"status": "CURRENT_REVISION_REJECTED" if analysis["current_confirm_state"] == "REJECTED"
+                    else "CURRENT_REVISION_NOT_CONFIRMED", "current_confirm_state": analysis["current_confirm_state"],
+                    "CURRENT_EFFECTIVE_REVISION": None, "analysis": None}
         return {**chain, "analysis": analysis}
 
     def latest_confirmed_analysis(self, stock_id):
         # Conservative: no timestamp tie-break across ambiguous revisions/roots.
-        return self.current_effective_revision(stock_id)["analysis"]
+        return self.current_effective_analysis_for_stock(stock_id)
