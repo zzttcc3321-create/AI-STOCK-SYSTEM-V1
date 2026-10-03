@@ -90,6 +90,15 @@ response（恰好三个键）
   reason 逐字使用输入区块的原因；输入没有原因时使用明确的 WARNING/UNVERIFIED/缺失声明，
   impact 显式声明本字段判断受限、置信度降低。
 - 市场/风险/置信度字段另有对应 `assessment` 枚举；建议位另有结构化 `advice`。
+- `confidence.assessment` 支持 `HIGH / MEDIUM / LOW`，保留 `statement` 中的置信度依据。
+  MEDIUM 不放宽建议门槛：LEVEL_1 仍须 HIGH，LEVEL_2 仍须 LOW。
+- `reasoning.content.steps` 是至少含一步的有序数组；每步须有 `statement / evidence_ids`，
+  可选 `fact_refs` 是本字段 `facts` 中的精确 `input_path` 列表。
+  步骤声明限定为“核对所引用输入事实”“依据所引用事实与限制，结论须人工核查”或
+  “输入缺失，无法形成有证据支撑的结论”，不能承载模型记忆或额外公司事实。
+  每步 Evidence 必须属于本字段及 Prompt，且实际支持所引用事实；不能用一个合法 ID 支撑另一条记录。
+  不提供 `fact_refs` 时，仅使用本步骤 Evidence 支持的已校验事实；显式引用不存在或不受支持的事实即拒绝。
+  核对事实步骤必须有事实支撑；缺失步骤须有明确限制、空 Evidence；结论步骤须有事实或明确限制。
 
 例如已有日 K 收盘价事实为：
 
@@ -159,8 +168,12 @@ schema 不接受“当前价/实时价”的自由文本断言，也不允许把
 model_version / model_output_hash / validated_output_hash / input_evidence_ids / used_evidence_ids /
 analysis_status=UNCONFIRMED / human_confirm=PENDING / created_at / final_conclusion=False`。
 
-draft 使用与 package 类似的进程内 seal：手工构造、dataclasses.replace 或强制改动后的草稿不能进入 factory。
-seal 是完整性检查，不是外部签名或认证。factory 检查 prompt 绑定及实际七字段引用集合。
+draft 和运行证据使用与 #007/#008 类似的进程内 seal：手工构造、dataclasses.replace 或强制改动后的草稿不能进入 factory。
+`AnalysisRunEvidence.from_draft()` 校验 prompt 绑定及实际七字段引用集合后设置 `_gate_digest`，
+覆盖上述全部 15 个 provenance 与业务状态字段，并调用 `validate_analysis_run_evidence()`。
+后续使用可从 `analysis.analysis_evidence` 导入该函数校验；手工构造或 replace（含无改动的 replace）
+都会失去 seal，强制改动任一字段会造成 digest mismatch，均拒绝。
+seal 为 `init=False`，不进入 `to_dict()` 或 repr；它是完整性检查，不是外部签名或认证。
 运行 ID 用新 UUID，created_at 是有时区的运行创建时间；它不是行情时钟。
 draft 深度只读、证据引用 tuple、所有业务状态字段禁止构造时指定确认完成状态。
 
@@ -175,10 +188,13 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 /tmp/verify009_offline.py
 git diff --check
 ```
 
-独立基线 290/290 PASS。最终全部 386/386 PASS：原 290 项 + 新增 96 项。
+独立基线 290/290 PASS。Review B 返修前 386/386 PASS；返修后全部 412/412 PASS：
+原 290 项 + #009 原新增 96 项 + 本次针对两个阻断项新增 26 项。
 新增测试位于 `test_analysis_output.py / test_analysis_runner.py / test_analysis_evidence.py`，
 覆盖任务卡列举的全部 18 条失败路径及持仓时钟、字段与记录的 Evidence 关联、seal、schema mutation、
 hash、确认项、一次调用、供应商中立状态和副作用守卫。
+本次回归补充 MEDIUM、非空步骤、步骤 Prompt 子集与实际事实关联、受限声明、
+Runner 拒绝非法步骤，以及运行证据手工构造、replace、全部 15 个字段强制篡改和 seal 丢失/篡改。
 
 真实离线验收使用既有 `/tmp/verify_information_008_repair.py` 的六份真实 archive。
 `/tmp/verify009_offline.py` 去除该上游验收脚本的 artifact 写入部分，保留原 replay 的完整校验，
@@ -210,7 +226,7 @@ Runner 阶段所有 Provider fetch、Normalizer normalize、EvidenceBuilder、�
 
 | 验收编号 | 核查结果 |
 | --- | --- |
-| 1–2 | 290 项基线保留；96 项新增全部 PASS |
+| 1–2 | 290 项基线、96 项 #009 测试及 26 项 Review B 回归全部 PASS |
 | 3–6 | sealed package 必需；模板/input hash 重算；单次 generate；Runner 无额外输入读取 |
 | 7–9 | 七字段、逐字段证据/时间/质量、Prompt 子集和记录级引用 PASS |
 | 10–12 | portfolio input 与市场 Evidence 分离；WATCH/HOLDING 正常与拒绝路径 PASS |
@@ -219,7 +235,15 @@ Runner 阶段所有 Provider fetch、Normalizer normalize、EvidenceBuilder、�
 | 18–20 | input_hash 与 envelope 相同；canonical hash 重算；used IDs 精确等于引用集合 |
 | 21–24 | UNCONFIRMED/PENDING；无最终结论；不使用 EvidenceBuilder 最终分析路径 |
 | 25–28 | 仅 injected fake 调用；数据库写入、Provider 调用、Runner raw 读取为零 |
-| 29–30 | 变更仅十个白名单文件；凭据模式扫描 PASS |
+| 29–30 | #009 累计十个文件；本次返修仅七个允许文件；新增行及凭据值模式扫描 PASS |
+
+Review B 返修只修改 `analysis/output_contracts.py / analysis/output_validator.py /
+analysis/analysis_evidence.py / tests/test_analysis_output.py / tests/test_analysis_runner.py /
+tests/test_analysis_evidence.py / docs/ANALYSIS_RUNNER_009.md`。
+`git diff 1b842b3..HEAD --name-only` 包含原 #009 已有的十个文件，其中
+`analysis/__init__.py / analysis/model_executor.py / analysis/runner.py` 在返修起点 `b278dce` 已存在差异。
+这三文件本次未修改；返修白名单应通过 `git diff b278dce..HEAD --name-only` 核查。
+未撤销原 #009 实现，未改 base，未合并或进入 #010。
 
 没有改 package_builder、prompt_builder、Normalizer、Provider、Evidence、bridge、冻结文档、schema 或 migration。
 初始已有的六个未跟踪 `__pycache__` 目录保留，测试使用 PYTHONDONTWRITEBYTECODE，不把它们当作本次变更。

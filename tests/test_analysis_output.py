@@ -90,6 +90,15 @@ def deterministic_response(envelope):
         if name == "risk_level": content["assessment"] = "UNKNOWN"
         if name == "confidence": content["assessment"] = "LOW"
         if name in {"operation_plan", "t_strategy"}: content["advice"] = {"level": "LEVEL_3"}
+        if name == "reasoning":
+            content["steps"] = ([
+                {"statement": "核对所引用输入事实", "evidence_ids": list(ids),
+                 "fact_refs": [selected["input_path"]]},
+                {"statement": "依据所引用事实与限制，结论须人工核查", "evidence_ids": list(ids),
+                 "fact_refs": [selected["input_path"]]},
+            ] if selected else [
+                {"statement": "输入缺失，无法形成有证据支撑的结论", "evidence_ids": []},
+            ])
         statuses = {item["status"] for item in limitations}
         status = ("MISSING" if not ids or "MISSING" in statuses else "NOT_AVAILABLE" if "NOT_AVAILABLE" in statuses
                   else "UNVERIFIED" if "UNVERIFIED" in statuses else "WARNING" if "WARNING" in statuses else "PASS")
@@ -124,6 +133,100 @@ class AnalysisOutputTests(unittest.TestCase):
         self.assertEqual(set(self.response), {"analysis", "human_confirmation_items", "final_state"})
         self.assertEqual(draft.analysis_status, "UNCONFIRMED")
         self.assertEqual(draft.human_confirm, "PENDING")
+
+    def test_medium_confidence_with_basis_valid(self):
+        self.response["analysis"]["confidence"]["content"]["assessment"] = "MEDIUM"
+        draft = self.validate()
+        self.assertEqual(draft.output["confidence"]["content"]["assessment"], "MEDIUM")
+        self.assertEqual(draft.output["confidence"]["content"]["statement"],
+                         "数据缺失或口径未验证导致置信度降低")
+
+    def test_reasoning_steps_preserve_order_and_support(self):
+        draft = self.validate()
+        steps = draft.output["reasoning"]["content"]["steps"]
+        self.assertEqual([step["statement"] for step in steps],
+                         ["核对所引用输入事实", "依据所引用事实与限制，结论须人工核查"])
+        self.assertEqual(steps[0]["evidence_ids"], ("EV-DAILY",))
+        self.assertEqual(draft.to_dict()["output"]["reasoning"]["content"]["steps"],
+                         self.response["analysis"]["reasoning"]["content"]["steps"])
+
+    def test_reasoning_without_steps_rejected(self):
+        del self.response["analysis"]["reasoning"]["content"]["steps"]
+        self.reject()
+
+    def test_reasoning_empty_steps_rejected(self):
+        self.response["analysis"]["reasoning"]["content"]["steps"] = []
+        self.reject()
+
+    def test_reasoning_step_requires_statement_and_evidence(self):
+        for key in ("statement", "evidence_ids"):
+            output = deepcopy(self.response)
+            del output["analysis"]["reasoning"]["content"]["steps"][0][key]
+            with self.subTest(key=key): self.reject(output)
+
+    def test_reasoning_step_evidence_outside_prompt_rejected(self):
+        other = PromptBuilder().build(AnalysisPackageBuilder().build(**package_arguments(quote=True)))
+        self.assertIn("EV-QUOTE", other.evidence_ids)
+        for identifier in ("EV-NONEXISTENT", "EV-QUOTE"):
+            output = deepcopy(self.response)
+            output["analysis"]["reasoning"]["content"]["steps"][0]["evidence_ids"] = [identifier]
+            with self.subTest(identifier=identifier): self.reject(output)
+
+    def test_reasoning_step_evidence_outside_field_rejected(self):
+        env = PromptBuilder().build(AnalysisPackageBuilder().build(**package_arguments(quote=True)))
+        output = deterministic_response(env)
+        output["analysis"]["reasoning"]["content"]["steps"][0]["evidence_ids"] = ["EV-QUOTE"]
+        self.reject(output, env)
+
+    def test_reasoning_step_evidence_must_support_referenced_fact(self):
+        env = PromptBuilder().build(AnalysisPackageBuilder().build(**package_arguments(quote=True)))
+        output = deterministic_response(env)
+        field = output["analysis"]["reasoning"]
+        field["evidence_ids"].append("EV-QUOTE")
+        field["time_range"] = {"start": "2026-09-30", "end": "2026-09-30T15:00:00Z"}
+        field["content"]["steps"][0]["evidence_ids"] = ["EV-QUOTE"]
+        with self.assertRaisesRegex(AnalysisOutputError, "unsupported fact"):
+            self.validate(output, env)
+
+    def test_reasoning_step_cannot_attach_unrelated_evidence_to_valid_fact(self):
+        env = PromptBuilder().build(AnalysisPackageBuilder().build(**package_arguments(quote=True)))
+        output = deterministic_response(env)
+        field = output["analysis"]["reasoning"]
+        field["evidence_ids"].append("EV-QUOTE")
+        field["content"]["steps"][0]["evidence_ids"].append("EV-QUOTE")
+        with self.assertRaisesRegex(AnalysisOutputError, "does not support"):
+            self.validate(output, env)
+
+    def test_reasoning_step_optional_fact_refs_resolve_supported_facts(self):
+        for step in self.response["analysis"]["reasoning"]["content"]["steps"]:
+            del step["fact_refs"]
+        self.validate()
+
+    def test_reasoning_step_absent_or_duplicate_fact_refs_rejected(self):
+        path = self.response["analysis"]["reasoning"]["content"]["facts"][0]["input_path"]
+        for refs in ([], ["financial_data.records.0.data.revenue"], [path, path]):
+            output = deepcopy(self.response)
+            output["analysis"]["reasoning"]["content"]["steps"][0]["fact_refs"] = refs
+            with self.subTest(refs=refs): self.reject(output)
+
+    def test_reasoning_step_free_company_prose_rejected(self):
+        self.response["analysis"]["reasoning"]["content"]["steps"][0]["statement"] = "公司拥有尚未提供的重大新项目"
+        self.reject()
+
+    def test_reasoning_fact_step_without_supported_inputs_rejected(self):
+        step = self.response["analysis"]["reasoning"]["content"]["steps"][0]
+        step.update(evidence_ids=[], fact_refs=[])
+        self.reject()
+
+    def test_reasoning_missing_input_step_cannot_cite_obtained_facts(self):
+        self.response["analysis"]["reasoning"]["content"]["steps"][0]["statement"] = "输入缺失，无法形成有证据支撑的结论"
+        self.reject()
+
+    def test_reasoning_unsupported_conclusion_without_facts_or_limitations_rejected(self):
+        content = self.response["analysis"]["reasoning"]["content"]
+        content.update(facts=[], limitations=[], steps=[
+            {"statement": "依据所引用事实与限制，结论须人工核查", "evidence_ids": []}])
+        self.reject()
 
     def test_every_missing_analysis_field_rejected(self):
         for name in ANALYSIS_FIELDS:
@@ -353,6 +456,14 @@ class AnalysisOutputTests(unittest.TestCase):
     def test_level2_high_confidence_rejected(self):
         self.level2()
         self.response["analysis"]["confidence"]["content"]["assessment"] = "HIGH"
+        self.reject()
+
+    def test_medium_confidence_does_not_relax_advice_gates(self):
+        self.response["analysis"]["confidence"]["content"]["assessment"] = "MEDIUM"
+        self.level2()
+        self.reject()
+        self.response["analysis"]["operation_plan"]["content"].update(
+            statement="明确操作建议", advice={"level": "LEVEL_1", "action": "HOLD"})
         self.reject()
 
     def test_level2_without_limitations_rejected(self):

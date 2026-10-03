@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .contracts import AnalysisInputError, PromptEnvelope, jsonable, safe_json
-from .output_contracts import AnalysisOutputError, ValidatedAnalysisDraft, validate_draft
+from .output_contracts import AnalysisOutputError, ValidatedAnalysisDraft, digest, validate_draft
 from .output_validator import prompt_inputs
 
 
@@ -38,6 +38,7 @@ class AnalysisRunEvidence:
     analysis_status: str = field(default="UNCONFIRMED", init=False)
     human_confirm: str = field(default="PENDING", init=False)
     final_conclusion: bool = field(default=False, init=False)
+    _gate_digest: str | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         validate_model_version(self.model_version)
@@ -75,7 +76,7 @@ class AnalysisRunEvidence:
         used = tuple(sorted({identifier for output in draft.output.values() for identifier in output["evidence_ids"]}))
         if used != draft.used_evidence_ids:
             raise AnalysisOutputError("used Evidence set mismatch")
-        return cls(
+        evidence = cls(
             analysis_run_id=uuid4().hex if analysis_run_id is None else analysis_run_id,
             stock_id=envelope.stock_id, prompt_version=envelope.prompt_version,
             template_hash=envelope.template_hash, input_hash=envelope.input_hash,
@@ -84,6 +85,16 @@ class AnalysisRunEvidence:
             input_evidence_ids=envelope.evidence_ids, used_evidence_ids=used,
             created_at=datetime.now(timezone.utc).isoformat() if created_at is None else created_at,
         )
+        object.__setattr__(evidence, "_gate_digest", digest(evidence.to_dict()))
+        validate_analysis_run_evidence(evidence)
+        return evidence
 
     def to_dict(self) -> dict:
-        return {item.name: jsonable(getattr(self, item.name)) for item in fields(self)}
+        return {item.name: jsonable(getattr(self, item.name)) for item in fields(self)
+                if not item.name.startswith("_")}
+
+
+def validate_analysis_run_evidence(evidence: AnalysisRunEvidence) -> None:
+    if (type(evidence) is not AnalysisRunEvidence or evidence._gate_digest is None
+            or evidence._gate_digest != digest(evidence.to_dict())):
+        raise AnalysisOutputError("run evidence has not passed validation or changed after validation")

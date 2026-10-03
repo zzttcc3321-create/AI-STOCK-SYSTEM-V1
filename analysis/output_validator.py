@@ -239,6 +239,8 @@ class SevenFieldValidator:
                 _require(context.status(item["input_path"]) == item["status"], "limitation contradicts prompt availability")
                 _require(context.limitation_reason(item["input_path"]) == item["reason"], "limitation reason contradicts input")
                 review_targets.add(item["input_path"])
+            if name == "reasoning":
+                self._reasoning(content, identifiers)
             _require(field["time_range"] == context.time_range(identifiers, refs), "time range does not match cited input clocks")
             quality = context.inputs["data_quality_report"]
             statuses = {quality["data_quality_status"]}
@@ -284,6 +286,30 @@ class SevenFieldValidator:
         )
         object.__setattr__(draft, "_gate_digest", digest(draft.to_dict()))
         return draft
+
+    def _reasoning(self, content: dict, field_ids: set[str]) -> None:
+        for step in content["steps"]:
+            identifiers = set(step["evidence_ids"])
+            _require(identifiers <= field_ids, "step evidence outside its field or prompt")
+            # Optional fact_refs are exact canonical input paths in reasoning.facts.
+            # Without them, select only facts supported by this step's Evidence.
+            facts = [fact for fact in content["facts"]
+                     if identifiers.intersection(fact["evidence_ids"])]
+            if "fact_refs" in step:
+                paths = set(step["fact_refs"])
+                facts = [fact for fact in facts if fact["input_path"] in paths]
+                _require(paths == {fact["input_path"] for fact in facts},
+                         "step references an absent or unsupported fact")
+            supported = {identifier for fact in facts for identifier in fact["evidence_ids"]}
+            _require(identifiers <= supported, "step evidence does not support its referenced inputs")
+            if step["statement"] == "核对所引用输入事实":
+                _require(bool(facts), "fact reasoning step requires supported inputs")
+            elif step["statement"] == "输入缺失，无法形成有证据支撑的结论":
+                _require(not identifiers and not facts and bool(content["limitations"]),
+                         "missing-input step requires explicit limitations and no facts")
+            else:
+                _require(bool(facts) or bool(content["limitations"]),
+                         "reasoning conclusion requires facts or explicit limitations")
 
     def _advice(self, field: dict, confidence: str, context: _Context) -> None:
         content = field["content"]

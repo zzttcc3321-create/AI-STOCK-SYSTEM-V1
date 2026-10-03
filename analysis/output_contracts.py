@@ -32,8 +32,13 @@ STATEMENTS = {
 ASSESSMENTS = {
     "market_view": ("UPWARD", "SIDEWAYS", "DOWNWARD", "UNCLEAR"),
     "risk_level": ("HIGH", "MEDIUM", "LOW", "UNKNOWN"),
-    "confidence": ("HIGH", "LOW"),
+    "confidence": ("HIGH", "MEDIUM", "LOW"),
 }
+REASONING_STEP_STATEMENTS = (
+    "核对所引用输入事实",
+    "依据所引用事实与限制，结论须人工核查",
+    "输入缺失，无法形成有证据支撑的结论",
+)
 ACTIONS = ("BUY", "SELL", "HOLD", "ADD", "REDUCE", "STOP_LOSS", "TAKE_PROFIT")
 REVIEW_ASSUMPTION = "分析仅依据所提供的证据，缺失数据不补足"
 LIMITATION_REASONS = {
@@ -65,6 +70,10 @@ def output_schema() -> dict[str, Any]:
     ids = {"type": "array", "items": text, "uniqueItems": True}
     fact = _object({"input_path": text, "value": {"type": ["string", "number", "boolean"]},
                     "evidence_ids": ids})
+    step = _object({"statement": {"enum": list(REASONING_STEP_STATEMENTS)},
+                    "evidence_ids": ids,
+                    "fact_refs": {"type": "array", "items": text, "uniqueItems": True}},
+                   required=("statement", "evidence_ids"))
     limitation = _object({"input_path": text, "status": {"enum": list(LIMITATION_REASONS)},
                           "reason": text, "impact": {"const": LIMITATION_IMPACT}})
     condition = _object({"input_path": text, "operator": {"enum": ["GT", "LT", "EQ"]},
@@ -85,6 +94,8 @@ def output_schema() -> dict[str, Any]:
             content["assessment"] = {"enum": list(ASSESSMENTS[name])}
         if name in ADVICE_FIELDS:
             content["advice"] = advice
+        if name == "reasoning":
+            content["steps"] = {"type": "array", "items": step, "minItems": 1}
         properties = {
             "content": _object(content), "evidence_ids": ids,
             "time_range": _object({"start": {"type": ["string", "null"]},

@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from analysis import AnalysisPackage, AnalysisPackageBuilder, AnalysisRunner, PromptBuilder
 from analysis.contracts import stable_json
+from analysis.analysis_evidence import validate_analysis_run_evidence
 from analysis.runner import (ANALYSIS_RUNNER_CAPABILITY, LIVE_MODEL_BACKEND_CONFIGURED,
                              LIVE_MODEL_RUNNING, REAL_MODEL_OUTPUT_VERIFIED, RUNTIME_ANALYSIS_MODEL)
 from analysis.prompt_builder import TEMPLATE_PATH
@@ -57,6 +58,29 @@ class AnalysisRunnerTests(unittest.TestCase):
         self.assertEqual(result.evidence.human_confirm, "PENDING")
         self.assertFalse(result.evidence.final_conclusion)
         self.assertEqual(result.evidence.model_version, self.fake.model_version)
+        validate_analysis_run_evidence(result.evidence)
+
+    def test_medium_confidence_and_reasoning_steps_run(self):
+        fake = FakeModelExecutor(mutate=lambda response: response["analysis"]["confidence"]["content"].update(
+            assessment="MEDIUM"))
+        result = AnalysisRunner(fake).run(self.package)
+        self.assertEqual(result.status, "UNCONFIRMED")
+        self.assertEqual(result.draft.output["confidence"]["content"]["assessment"], "MEDIUM")
+        self.assertEqual(len(result.draft.output["reasoning"]["content"]["steps"]), 2)
+        validate_analysis_run_evidence(result.evidence)
+
+    def test_missing_steps_never_builds_run_evidence(self):
+        fake = FakeModelExecutor(mutate=lambda response: response["analysis"]["reasoning"]["content"].pop("steps"))
+        with patch("analysis.runner.AnalysisRunEvidence.from_draft", side_effect=AssertionError("must not build")) as build:
+            self.assert_failed(AnalysisRunner(fake).run(self.package), "OUTPUT_INVALID")
+            build.assert_not_called()
+
+    def test_out_of_prompt_step_evidence_never_builds_run_evidence(self):
+        fake = FakeModelExecutor(mutate=lambda response: response["analysis"]["reasoning"]["content"]["steps"][0].update(
+            evidence_ids=["EV-OUTSIDE-PROMPT"]))
+        with patch("analysis.runner.AnalysisRunEvidence.from_draft", side_effect=AssertionError("must not build")) as build:
+            self.assert_failed(AnalysisRunner(fake).run(self.package), "OUTPUT_INVALID")
+            build.assert_not_called()
 
     def test_one_generate_call_receives_frozen_envelope_and_schema(self):
         result = self.runner.run(self.package)

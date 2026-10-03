@@ -9,6 +9,7 @@ from unittest.mock import patch
 from analysis import (AnalysisOutputError, AnalysisPackageBuilder, AnalysisRunEvidence,
                       PromptBuilder, SevenFieldValidator, ValidatedAnalysisDraft)
 from analysis.output_contracts import digest
+from analysis.analysis_evidence import validate_analysis_run_evidence
 from evidence import EvidenceRecord
 from test_analysis_package import package_arguments
 from test_analysis_output import deterministic_response
@@ -34,6 +35,66 @@ class AnalysisRunEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence.model_output_hash, hashlib.sha256(self.response.encode()).hexdigest())
         self.assertEqual(evidence.validated_output_hash, digest(self.draft.output))
         self.assertEqual(evidence.input_evidence_ids, self.envelope.evidence_ids)
+
+    def test_factory_seals_all_serialized_provenance(self):
+        evidence = self.build()
+        validate_analysis_run_evidence(evidence)
+        self.assertEqual(evidence._gate_digest, digest(evidence.to_dict()))
+        self.assertNotIn("_gate_digest", evidence.to_dict())
+        self.assertNotIn("_gate_digest", repr(evidence))
+
+    def test_replace_even_without_changes_loses_seal(self):
+        evidence = self.build()
+        for copied in (replace(evidence), replace(evidence, model_version="OTHER-MODEL")):
+            self.assertIsNone(copied._gate_digest)
+            with self.assertRaises(AnalysisOutputError): validate_analysis_run_evidence(copied)
+        validate_analysis_run_evidence(evidence)
+
+    def test_hand_constructed_run_evidence_has_no_seal(self):
+        value = self.build().to_dict()
+        for key in ("analysis_status", "human_confirm", "final_conclusion"): value.pop(key)
+        evidence = AnalysisRunEvidence(**value)
+        self.assertIsNone(evidence._gate_digest)
+        with self.assertRaises(AnalysisOutputError): validate_analysis_run_evidence(evidence)
+
+    def test_seal_cannot_be_supplied_at_construction(self):
+        value = self.build().to_dict()
+        for key in ("analysis_status", "human_confirm", "final_conclusion"): value.pop(key)
+        with self.assertRaises(TypeError): AnalysisRunEvidence(**value, _gate_digest="0" * 64)
+
+    def test_every_provenance_and_state_mutation_fails_validation(self):
+        changes = {
+            "analysis_run_id": "OTHER-RUN", "stock_id": "OTHER.SH",
+            "prompt_version": "OTHER-PROMPT", "template_hash": "0" * 64,
+            "input_hash": "0" * 64, "output_schema_version": "OTHER-SCHEMA",
+            "model_version": "OTHER-MODEL", "model_output_hash": "0" * 64,
+            "validated_output_hash": "0" * 64,
+            "input_evidence_ids": ("EV-DAILY", "EV-OTHER"), "used_evidence_ids": (),
+            "created_at": "2026-10-04T12:00:00Z", "analysis_status": "CONFIRMED",
+            "human_confirm": "CONFIRMED", "final_conclusion": True,
+        }
+        self.assertEqual(set(changes), set(self.build().to_dict()))
+        for name, value in changes.items():
+            evidence = self.build()
+            object.__setattr__(evidence, name, value)
+            with self.subTest(name=name), self.assertRaises(AnalysisOutputError):
+                validate_analysis_run_evidence(evidence)
+
+    def test_replaced_provenance_fields_fail_validation(self):
+        for changes in ({"used_evidence_ids": ()}, {"input_hash": "0" * 64},
+                        {"analysis_run_id": "OTHER-RUN"}, {"created_at": "2026-10-04T12:00:00Z"}):
+            with self.subTest(field=next(iter(changes))), self.assertRaises(AnalysisOutputError):
+                validate_analysis_run_evidence(replace(self.build(), **changes))
+
+    def test_wrong_type_missing_or_changed_seal_fails_validation(self):
+        for value in (None, {}, self.build().to_dict(), self.draft):
+            with self.subTest(kind=type(value).__name__), self.assertRaises(AnalysisOutputError):
+                validate_analysis_run_evidence(value)
+        for seal in (None, "0" * 64):
+            evidence = self.build()
+            object.__setattr__(evidence, "_gate_digest", seal)
+            with self.subTest(seal=seal), self.assertRaises(AnalysisOutputError):
+                validate_analysis_run_evidence(evidence)
 
     def test_used_evidence_is_exact_seven_field_union(self):
         evidence = self.build()
