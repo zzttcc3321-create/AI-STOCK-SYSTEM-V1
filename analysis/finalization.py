@@ -121,6 +121,23 @@ def validate_final_analysis_evidence(evidence: FinalAnalysisEvidence) -> None:
     aware_time(evidence.confirmed_at)
 
 
+def _quality_review_affects_field(original: Mapping[str, Any], target: str) -> bool:
+    # #009 does not require a field to repeat every anomaly in limitations.
+    # Facts still identify block dependencies when that optional prose is absent.
+    paths = [item["input_path"] for item in original["content"]["limitations"]]
+    paths.extend(item["input_path"] for item in original["content"]["facts"])
+    if any(path == target or path.startswith(target + ".") for path in paths):
+        return True
+    # The sealed draft/run pair lacks a complete Evidence-to-source/block map.
+    # Conservatively associate every degraded field with quality reviews; for
+    # aggregate/source reviews, also suppress all evidenced fields. Human review
+    # cannot turn an unresolved dependency into an effective confirmed output.
+    if original["data_quality_status"] != "PASS":
+        return True
+    return bool(original["evidence_ids"]) and (
+        target == "data_quality_report" or target.startswith("data_quality_report.source_status."))
+
+
 def _review_content(flow: ConfirmationFlow) -> dict:
     flow.validate()
     decisions = []
@@ -140,8 +157,7 @@ def _review_content(flow: ConfirmationFlow) -> dict:
         original = flow.draft.output[target]
         related = [item for item in decisions if item["target"] == target or (
             item["reason_code"] == "REVIEW_DATA_QUALITY"
-            and any(limitation["input_path"] == item["target"]
-                    for limitation in original["content"]["limitations"]))]
+            and _quality_review_affects_field(original, item["target"]))]
         modified = [item for item in flow.human_overrides if item.target == target]
         override = modified[0] if modified else None
         ordinary_rejections = [item for item in related if item["state"] == "REJECTED"
@@ -257,6 +273,7 @@ def finalize_analysis(flow: ConfirmationFlow, candidate: PreparedFinalSnapshot, 
         name: jsonable(getattr(candidate, name))
         for name in ("seven_fields", "confirmation_decisions", "human_overrides", "watch_items")
     }, "PREPARED_SNAPSHOT_STALE")
+    require(bool(flow.run_evidence.used_evidence_ids), "MODEL_OUTPUT_NEEDS_EVIDENCE")
     records = _supporting_records(flow.run_evidence, evidence_records,
                                   human_reference_ids=_human_reference_ids(candidate.seven_fields))
     identifier = uuid4().hex if final_evidence_id is None else final_evidence_id

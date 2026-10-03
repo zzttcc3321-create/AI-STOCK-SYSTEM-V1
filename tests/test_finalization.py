@@ -1,16 +1,19 @@
 """Final report review gates, seals, retained history and report revisions."""
 
 from dataclasses import FrozenInstanceError, fields, replace
+import json
 import unittest
 
 from analysis import (
-    ConfirmationError, finalize_analysis, validate_final_analysis_evidence,
+    AnalysisPackageBuilder, AnalysisRunEvidence, ConfirmationError, ConfirmationFlow,
+    PromptBuilder, SevenFieldValidator, finalize_analysis, validate_final_analysis_evidence,
     validate_final_snapshot, validate_finalization_result, validate_prepared_snapshot,
 )
 from analysis.contracts import jsonable
 from analysis.finalization import final_snapshot_content_hash
 from analysis.output_contracts import ANALYSIS_FIELDS, digest
 from evidence import HumanConfirm
+from test_analysis_output import deterministic_response
 from test_analysis_package import information_package_arguments, package_arguments
 from test_human_confirmation import ACTOR, STAMP, changed_field, confirm_remaining, make_flow, source_records
 
@@ -28,6 +31,20 @@ def final_result(flow=None, candidate=None):
     flow.confirm_final_report(candidate, actor_id=ACTOR, created_at=STAMP)
     result = finalize_analysis(flow, candidate, evidence_records=source_records(flow.run_evidence))
     return flow, candidate, result
+
+
+def quality_dependency_flow(*, source_status="PASS", block_status="PASS"):
+    arguments = package_arguments()
+    arguments["source_status"]["TUSHARE_MCP"] = source_status
+    arguments["canonical_data"]["daily_kline"][0]["data_quality_status"] = block_status
+    envelope = PromptBuilder().build(AnalysisPackageBuilder().build(**arguments))
+    response = deterministic_response(envelope)
+    field = response["analysis"]["market_view"]
+    field["content"]["limitations"] = []
+    field["data_quality_status"] = source_status if source_status != "PASS" else block_status
+    draft = SevenFieldValidator().validate(json.dumps(response, ensure_ascii=False), envelope)
+    run = AnalysisRunEvidence.from_draft(envelope, draft, model_version="OFFLINE-FIXTURE-010")
+    return ConfirmationFlow(draft, run)
 
 
 class PreparationTests(unittest.TestCase):
@@ -113,6 +130,52 @@ class PreparationTests(unittest.TestCase):
                             for item in candidate.seven_fields.values()))
         self.assertTrue(any(item["target"] == target and item["state"] == "REJECTED"
                             for item in candidate.watch_items))
+
+    def test_rejected_source_quality_suppresses_evidenced_field_without_limitations(self):
+        for status in ("WARNING", "UNVERIFIED"):
+            with self.subTest(status=status):
+                flow = quality_dependency_flow(source_status=status)
+                original = flow.draft.to_dict(), flow.run_evidence.to_dict()
+                field = flow.draft.output["market_view"]
+                self.assertEqual(field["content"]["limitations"], ())
+                self.assertEqual(field["data_quality_status"], status)
+                self.assertEqual(field["evidence_ids"], ("EV-DAILY",))
+                target = "data_quality_report.source_status.TUSHARE_MCP"
+                flow.reject(target, "REVIEW_DATA_QUALITY", actor_id=ACTOR, reason="来源异常未获认可")
+                confirm_remaining(flow)
+                candidate = flow.prepare_final_snapshot()
+                _, _, result = final_result(flow, candidate)
+                for view in (candidate, result.snapshot):
+                    reviewed = view.seven_fields["market_view"]
+                    self.assertEqual(reviewed["DECISION"], "REJECTED")
+                    self.assertIsNone(reviewed["EFFECTIVE_VALUE"])
+                    self.assertTrue(any(item["target"] == target and item["state"] == "REJECTED"
+                                        for item in reviewed["decision_reasons"]))
+                self.assertEqual(original, (flow.draft.to_dict(), flow.run_evidence.to_dict()))
+
+    def test_rejected_block_quality_suppresses_fact_dependency_without_limitations(self):
+        flow = quality_dependency_flow(block_status="WARNING")
+        target = "canonical_market_data.daily_kline"
+        self.assertTrue(flow.draft.output["market_view"]["content"]["facts"][0]["input_path"].startswith(target + "."))
+        flow.reject(target, "REVIEW_DATA_QUALITY", actor_id=ACTOR, reason="行情需回上游复核")
+        confirm_remaining(flow)
+        field = flow.prepare_final_snapshot().seven_fields["market_view"]
+        self.assertEqual(field["DECISION"], "REJECTED")
+        self.assertIsNone(field["EFFECTIVE_VALUE"])
+
+    def test_override_cannot_bypass_rejected_source_quality_without_limitations(self):
+        flow = quality_dependency_flow(source_status="WARNING")
+        replacement = jsonable(flow.draft.output["market_view"])
+        replacement["content"]["assessment"] = "UPWARD"
+        flow.modify("market_view", "REVIEW_FIELD", replacement, actor_id=ACTOR,
+                    reason="人工判断趋势", referenced_evidence_ids=("EV-DAILY",))
+        flow.reject("data_quality_report.source_status.TUSHARE_MCP", "REVIEW_DATA_QUALITY",
+                    actor_id=ACTOR, reason="不能采纳异常来源")
+        confirm_remaining(flow)
+        field = flow.prepare_final_snapshot().seven_fields["market_view"]
+        self.assertEqual(field["DECISION"], "REJECTED")
+        self.assertIsNone(field["EFFECTIVE_VALUE"])
+        self.assertEqual(jsonable(field["HUMAN_OVERRIDE"]["replacement"]), replacement)
 
     def test_warning_items_all_have_explicit_results(self):
         arguments = package_arguments()

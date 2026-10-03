@@ -235,19 +235,53 @@ class FinalTraceTests(unittest.TestCase):
         with self.assertRaises(ConfirmationError):
             trace_final_analysis(result, flow.draft, flow.run_evidence, evidence_records=records)
 
-    def test_no_evidence_draft_finalizes_only_explicit_insufficiency(self):
+    def test_no_evidence_draft_preserves_review_but_cannot_finalize(self):
         arguments = package_arguments()
         arguments["canonical_data"] = {}
         arguments["evidence_metadata"] = []
         arguments["evidence_links"] = {}
         arguments["source_status"]["TUSHARE_MCP"] = "MISSING"
         flow, candidate = reviewed_flow(arguments=arguments)
-        _, _, result = final_result(flow, candidate)
-        self.assertEqual(result.conclusion.evidence_ids, ())
-        trace = trace_final_analysis(result, flow.draft, flow.run_evidence, evidence_records=())
-        self.assertTrue(trace.complete)
-        self.assertEqual(trace.chain, ())
-        self.assertTrue(result.snapshot.watch_items)
+        self.assertEqual(flow.run_evidence.used_evidence_ids, ())
+        self.assertEqual(flow.draft.final_state, "UNCONFIRMED")
+        self.assertTrue(candidate.watch_items)
+        flow.confirm_final_report(candidate, actor_id=ACTOR)
+        before = candidate.to_dict(), flow.events, flow.draft.to_dict(), flow.run_evidence.to_dict()
+        with ExitStack() as stack:
+            factories = [stack.enter_context(patch("analysis.finalization." + name))
+                         for name in ("FinalAnalysisSnapshot", "FinalAnalysisEvidence", "AnalysisConclusion")]
+            with self.assertRaisesRegex(ConfirmationError, "MODEL_OUTPUT_NEEDS_EVIDENCE"):
+                finalize_analysis(flow, candidate, evidence_records=())
+            for factory in factories:
+                factory.assert_not_called()
+        self.assertEqual(before, (candidate.to_dict(), flow.events, flow.draft.to_dict(), flow.run_evidence.to_dict()))
+        self.assertIsNone(flow._final_evidence_id)
+        self.assertIsNone(flow._final_snapshot_hash)
+        self.assertEqual(candidate.final_state, "PREPARED")
+        flow.validate()
+
+    def test_unused_input_evidence_cannot_promote_unevidenced_output_to_final(self):
+        envelope = PromptBuilder().build(AnalysisPackageBuilder().build(**package_arguments()))
+        response = deterministic_response(envelope)
+        for field in response["analysis"].values():
+            field["evidence_ids"] = []
+            field["content"]["facts"] = []
+            field["data_quality_status"] = "MISSING"
+            field["time_range"] = {"start": None, "end": None}
+        response["analysis"]["market_view"]["content"]["statement"] = "证据不足，趋势不明"
+        response["analysis"]["reasoning"]["content"]["steps"] = [
+            {"statement": "输入缺失，无法形成有证据支撑的结论", "evidence_ids": []}]
+        draft = SevenFieldValidator().validate(json.dumps(response, ensure_ascii=False), envelope)
+        run = AnalysisRunEvidence.from_draft(envelope, draft, model_version="OFFLINE-FIXTURE-010")
+        self.assertEqual(run.input_evidence_ids, ("EV-DAILY",))
+        self.assertEqual(run.used_evidence_ids, ())
+        flow = ConfirmationFlow(draft, run)
+        confirm_remaining(flow)
+        candidate = flow.prepare_final_snapshot()
+        flow.confirm_final_report(candidate, actor_id=ACTOR)
+        with self.assertRaisesRegex(ConfirmationError, "MODEL_OUTPUT_NEEDS_EVIDENCE"):
+            finalize_analysis(flow, candidate, evidence_records=source_records(run))
+        self.assertIsNone(flow._final_evidence_id)
 
     def test_complete_offline_flow_and_zero_side_effects(self):
         result = offline_demonstration()

@@ -106,6 +106,10 @@ PreparedFinalSnapshot 为 `PENDING / PREPARED`，此阶段不生成 FINAL 对象
 最终确认必须传入该 flow 实际生成的 sealed candidate，事件绑定其 hash。
 FINAL_REPORT=PENDING/REJECTED 不生成最终对象；确认后若又发生纠错，最终化也拒绝。
 重复最终化拒绝，工厂失败时不占用 final_evidence_id。
+即使 FINAL_REPORT 已确认，`run.used_evidence_ids` 为空仍报 `MODEL_OUTPUT_NEEDS_EVIDENCE`，
+在创建 FinalAnalysisSnapshot、FinalAnalysisEvidence 或 AnalysisConclusion 前拒绝。
+#009 无证据的 UNCONFIRMED 草稿、确认日志和 PREPARED 待审信息可保留；
+仅有未使用的 input Evidence 也不能使其进入完整最终分析或完整 Trace。
 
 seven_fields 恰好包含 market_view / position_status / risk_level / operation_plan /
 t_strategy / reasoning / confidence。每个字段包含：
@@ -118,7 +122,11 @@ t_strategy / reasoning / confidence。每个字段包含：
 
 字段同时显示 AI_ORIGINAL、原 AI_OUTPUT_HASH、HUMAN_DECISION、HUMAN_OVERRIDE、ORIGIN 和逐原因处理记录。
 任何普通驳回优先于 Override，防止人工替换掩盖尚未采纳的其他确认原因。
-驳回异常数据项会抑制引用该 limitation 的字段；驳回关键假设会抑制 reasoning。
+驳回异常数据项会抑制通过 limitations 或 facts 路径关联的字段，不能只依赖模型主动声明 limitation。
+sealed draft/run 不含完整的 Evidence 到来源/数据块映射，因此保守地将所有非 PASS 字段关联到质量确认项；
+对整体质量或 source_status 确认项，还关联所有有 Evidence 依赖的字段。
+依赖无法精确排除时宁可扩大抑制范围；驳回仍优先于 Human Override，有效值为 NULL。
+驳回关键假设会抑制 reasoning。
 撤销 Override 后该字段的有效值也为 NULL。
 watch_items 保留数据不足/异常项和驳回原因，确认异常项不会把原数据质量改成 PASS。
 关键假设及异常项的处理结果完整保存在 confirmation_decisions。
@@ -184,7 +192,10 @@ ID 全局唯一性、持久化追加约束和当前 revision 选择留给接入�
 
 ## 离线验收
 
-全量 524/524 PASS：原 412 项 + #010 新增 112 项（确认 50、最终化 42、Trace/离线流程 20）。
+Review B 修复前基线 524/524 PASS；修复后全量 528/528 PASS：原 412 项 + #010 共 116 项
+（确认 50、最终化 45、Trace/离线流程 21）。新增回归覆盖无 limitation 的 WARNING/UNVERIFIED
+来源依赖、facts 数据块依赖、Override 不能绕过质量驳回，以及有输入但零 used Evidence 的最终化拒绝。
+原无 Evidence 测试改为验证保留 PREPARED/日志、拒绝所有 FINAL 对象创建，原 #009 草稿仍为 UNCONFIRMED。
 凭据值扫描、既有 CI 敏感文件规则扫描、八文件白名单与 whitespace 检查全部 PASS。
 
 ```bash
