@@ -237,7 +237,7 @@ ConfirmationEvent、HumanOverride、FinalAnalysisEvidence、完整 final snapsho
 | `model_version` | `TEXT NOT NULL` | AnalysisConclusion.model_version = FinalAnalysisSnapshot.model_version |
 | `calculation` | `TEXT NOT NULL` | AnalysisConclusion.calculation 完整 JSON object（#010 已有键，不借 reasoning） |
 | `evidence_ids` | `TEXT NOT NULL` | AnalysisConclusion.evidence_ids 的有序 JSON array = run.used_evidence_ids |
-| `supersedes_analysis_report_id` | `TEXT UNIQUE REFERENCES analysis_reports(id)` | FinalAnalysisSnapshot.supersedes_analysis_report_id；显式 FK |
+| `supersedes_analysis_report_id` | `TEXT REFERENCES analysis_reports(id)` | FinalAnalysisSnapshot.supersedes_analysis_report_id；显式 FK |
 | `final_snapshot_hash` | `TEXT NOT NULL UNIQUE REFERENCES analysis_snapshots(snapshot_hash) DEFERRABLE INITIALLY DEFERRED` | FinalAnalysisSnapshot.final_snapshot_hash；关联 FINAL snapshot |
 | `final_evidence_id` | `TEXT NOT NULL UNIQUE REFERENCES analysis_final_evidence(final_evidence_id) DEFERRABLE INITIALLY DEFERRED` | FinalAnalysisEvidence.final_evidence_id；显式关联最终证据 |
 
@@ -258,8 +258,7 @@ ConfirmationEvent、HumanOverride、FinalAnalysisEvidence、完整 final snapsho
 | `collection_task_id` | `TEXT` | EvidenceRecord.collection_task_id；opaque ID，禁止虚构旧 collection_tasks FK |
 | `system_run_id` | `TEXT` | EvidenceRecord.system_run_id；opaque ID，禁止复用 screening_runs |
 | `created_at` | `TEXT NOT NULL` | 调用方显式 persistence envelope.evidence_created_at，非猜测的 Provider 时间 |
-| `metadata_json` | `TEXT NOT NULL` | JSON object：endpoint_or_tool / request_params / provider_timestamp / validation_result / raw_response_hash / normalized_data_hash / analysis_output_hash；直接取 EvidenceRecord 同名字段；validation_result={status,failures} |
-| `supersedes_evidence_id` | `TEXT UNIQUE REFERENCES evidence_records(id)` | EvidenceRecord.supersedes_evidence_id；显式 FK，旧证据不变 |
+| `supersedes_evidence_id` | `TEXT REFERENCES evidence_records(id)` | EvidenceRecord.supersedes_evidence_id；显式 FK，旧证据不变 |
 
 表级约束：`CHECK(supersedes_evidence_id IS NULL OR supersedes_evidence_id <> id)`。
 
@@ -315,7 +314,10 @@ ConfirmationEvent、HumanOverride、FinalAnalysisEvidence、完整 final snapsho
 | `revision_id` | `TEXT NOT NULL` | 相应 snapshot.revision_id |
 | `payload_json` | `TEXT NOT NULL` | PreparedFinalSnapshot.to_dict() 或 FinalAnalysisSnapshot.to_dict() 完整公开 JSON object；字段列表见下 |
 
-表级约束：`CHECK(length(snapshot_hash) = 64 AND snapshot_hash NOT GLOB '*[^0-9a-f]*')`。
+表级约束：`CHECK(length(snapshot_hash) = 64 AND snapshot_hash NOT GLOB '*[^0-9a-f]*')`，
+`UNIQUE(analysis_report_id, revision_id, snapshot_kind)`（snapshot_kind 即契约中的 snapshot_type）。
+同一 report revision 至多一个 PREPARED candidate；保留 `snapshot_kind = 'FINAL'` 时
+`analysis_report_id` 的 partial UNIQUE index，每 report 至多一个 FINAL。
 
 ### analysis_final_evidence
 
@@ -335,7 +337,7 @@ ConfirmationEvent、HumanOverride、FinalAnalysisEvidence、完整 final snapsho
 | `used_evidence_ids` | `TEXT NOT NULL` | FinalAnalysisEvidence.used_evidence_ids；有序 JSON array；须为 input 子集 |
 | `confirmed_by` | `TEXT NOT NULL` | FinalAnalysisEvidence.confirmed_by |
 | `confirmed_at` | `TEXT NOT NULL` | FinalAnalysisEvidence.confirmed_at |
-| `supersedes_final_evidence_id` | `TEXT UNIQUE REFERENCES analysis_final_evidence(final_evidence_id)` | FinalAnalysisEvidence.supersedes_final_evidence_id |
+| `supersedes_final_evidence_id` | `TEXT REFERENCES analysis_final_evidence(final_evidence_id)` | FinalAnalysisEvidence.supersedes_final_evidence_id |
 | `human_confirm` | `TEXT NOT NULL CHECK(human_confirm = 'CONFIRMED')` | FinalAnalysisEvidence.human_confirm |
 
 表级约束：`CHECK(supersedes_final_evidence_id IS NULL OR supersedes_final_evidence_id <> final_evidence_id)`。
@@ -361,8 +363,12 @@ calculation 为同名 JSON 列；id = analysis_reports.id，不新建第八表�
 Snapshot 的 supersedes 字段在 payload 中原样保存，同时 FINAL 的 report predecessor
 映射显式 analysis_reports.supersedes_analysis_report_id；FinalAnalysisEvidence predecessor
 映射显式 analysis_final_evidence.supersedes_final_evidence_id，不能省略互相配对校验。
-EvidenceRecord.normalization_rule 在 calculation.normalization_rule，其他七项元数据在 metadata_json；
-EvidenceValidationResult.status/failures 原样保留。全部 Provider domain 公开字段都有确定载体。
+EvidenceRecord.normalization_rule 在 calculation.normalization_rule；endpoint_or_tool / request_params /
+provider_timestamp / validation_result（含 status/failures）/ raw_response_hash / normalized_data_hash /
+analysis_output_hash 继续仅由冻结 Evidence Pipeline 的 metadata sidecar 权威承载，数据库不设副本。
+三个 supersedes 字段允许多个后继，保留 FK 与 no-self-reference；DOMAIN_LOGIC_CHANGE=NO。
+以下 G0 inventory 中 decision_signals 的既有 metadata_json 是旧表原始字段，原样保留，与新
+evidence_records 无关；本轮不修改 inventory、旧表或 Evidence Pipeline。
 
 analysis_history=LEGACY_READ_ONLY_HISTORY；不 backfill，不强行转换新对象；record_origin=LEGACY_HISTORY。
 唯一 UPDATE 例外为 analysis_tasks.status，五张指定 INSERT_ONLY 表及正式 report 不允许 UPDATE/DELETE。

@@ -25,7 +25,7 @@ qi 已选 A，GPT D22 限定七表增补；本轮只执行任务卡 RESUME 第 1
 下方原 G0 报告全文保留为历史证据；其 BLOCKED/未批准/未开始实施等描述指解冻前状态。
 原 G0 对 legacy schema 信息不足的判断仍成立，V1.1 测试不重建或伪造旧 32 表。
 后续 #012 的 repository/正式 migration/真实库检查尚未实施；本轮的 READY 仅针对已授权的映射契约。
-最终测试结果及可复跑验收代码置于末尾。inventory 本身不提交，schema 元数据投影已纳入映射文档。
+最终测试结果及可自动发现的契约测试入口置于末尾。inventory 本身不提交，schema 元数据投影已纳入映射文档。
 
 ## G0 原始阻塞审计（历史保留）
 
@@ -225,406 +225,15 @@ inventory 结构/主键/索引一致性只读核验通过；缺失与阻塞判�
 
 ## RESUME 可复跑新增验收测试
 
-为遵守“不新增 RESUME 节之外的文件”，测试以本授权文档代码块交付，无额外测试文件。
-运行于仓库根目录；仅使用既有离线 synthetic fixtures 与新七表获批契约，不读取真实业务行，
-全局 sqlite3.connect guard 只允许 :memory:；不把 V1.1 当作 G0 旧 schema。
-这些是 schema contract / in-memory serialization 与 rollback 验证，#012 repository 仍未实现。
-
-执行：
+GPT Review B 返修授权将原 18 项契约测试落成
+[tests/test_persistence_schema_v1_1.py](../tests/test_persistence_schema_v1_1.py)，并增加 B2/B3 回归测试。
+只使用既有离线 synthetic fixtures 与 :memory: 新七表契约，全局 sqlite3.connect guard 在
+fixture/domain imports 前安装，拒绝所有非 :memory: 参数。不连接真实库、不重做 G0。
 
 ```bash
-python3 -B - <<'PY'
-from pathlib import Path
-text = Path('docs/PERSISTENCE_READINESS_011.md').read_text()
-code = text.split('\n<!-- RESUME_TESTS_BEGIN -->\n', 1)[1].split('\n<!-- RESUME_TESTS_END -->', 1)[0]
-code = code.split('```python\n', 1)[1].rsplit('\n```', 1)[0]
-exec(compile(code, '<011-resume-contract-tests>', 'exec'))
-PY
+python3 -B -m unittest discover -s tests -p 'test_persistence_schema_v1_1.py'
+python3 -B -m unittest discover -s tests
 ```
-
-<!-- RESUME_TESTS_BEGIN -->
-```python
-import ast
-from collections.abc import Mapping
-from dataclasses import asdict, fields
-from enum import Enum
-import math
-from datetime import datetime
-import hashlib
-import importlib
-import json
-from pathlib import Path
-import re
-import sqlite3
-import subprocess
-import sys
-import unittest
-from unittest.mock import patch
-
-sys.path.insert(0, str(Path('tests').resolve()))
-from persistence import schema_v1_1 as schema
-from analysis import AnalysisPackageBuilder, AnalysisRunner, ConfirmationFlow, PromptBuilder, finalize_analysis
-from analysis.contracts import safe_json, stable_json
-from analysis.output_contracts import OutputParser, digest
-from evidence import EvidenceSource, HumanConfirm
-from test_analysis_runner import FakeModelExecutor
-from test_analysis_package import package_arguments
-from test_analysis_output import deterministic_response
-from test_human_confirmation import ACTOR, STAMP, changed_field, confirm_remaining, source_records
-
-EXPECTED = ('analysis_tasks', 'analysis_reports', 'evidence_records',
-            'analysis_confirmation_events', 'analysis_human_overrides',
-            'analysis_snapshots', 'analysis_final_evidence')
-WHITELIST = {'docs/frozen/DB_SCHEMA_V1.1.md',
-             'docs/decisions/DB_SCHEMA_V1_1_PERSISTENCE_UNFREEZE_20261003.md',
-             'docs/DB_COMPATIBILITY_MAPPING_011.md',
-             'docs/PERSISTENCE_READINESS_011.md', 'persistence/schema_v1_1.py'}
-BASELINE = 'eaa928a2ad99121154563e8ecc660841beee5fcb'
-REAL_CONNECT = sqlite3.connect
-
-def memory_only(database, *args, **kwargs):
-    if database != ':memory:':
-        raise AssertionError('REAL_DB_CONNECTION=FORBIDDEN')
-    return REAL_CONNECT(database, *args, **kwargs)
-
-# Global guard, including all imports and test fixture calls after this point.
-sqlite3.connect = memory_only
-
-def insert(db, table, row):
-    columns = ','.join(row)
-    db.execute(f'INSERT INTO {table} ({columns}) VALUES ({",".join("?" for _ in row)})',
-               tuple(row.values()))
-
-def encode(value):
-    # Persistence provenance contains raw_response_hash keys. Input-domain
-    # privacy filters are not a persistence serializer; validate JSON types here.
-    def validate(item):
-        if isinstance(item, Enum):return validate(item.value)
-        if isinstance(item, Mapping):
-            for key,child in item.items():
-                if type(key) is not str:raise ValueError('JSON keys must be text')
-                validate(child)
-        elif isinstance(item,(tuple,list)):
-            for child in item:validate(child)
-        elif item is None or type(item) in (str,bool,int):pass
-        elif type(item) is float and math.isfinite(item):pass
-        else:raise ValueError('only finite JSON values')
-    validate(value)
-    return stable_json(value)
-
-def fixture():
-    package = AnalysisPackageBuilder().build(**package_arguments(quote=True))
-    execution = AnalysisRunner(FakeModelExecutor()).run(package)
-    assert execution.status == 'UNCONFIRMED'
-    flow = ConfirmationFlow(execution.draft, execution.evidence, analysis_report_id='REPORT-011-001')
-    flow.modify('risk_level', 'REVIEW_FIELD', changed_field(flow), actor_id=ACTOR,
-                reason='人工上调风险', referenced_evidence_ids=flow.run_evidence.input_evidence_ids,
-                created_at=STAMP)
-    flow.reject('operation_plan', 'REVIEW_ADVICE', actor_id=ACTOR, reason='暂不采纳', created_at=STAMP)
-    confirm_remaining(flow)
-    prepared = flow.prepare_final_snapshot()
-    flow.confirm_final_report(prepared, actor_id=ACTOR, created_at=STAMP)
-    final = finalize_analysis(flow, prepared, evidence_records=source_records(flow.run_evidence),
-                              final_evidence_id='FINAL-EVIDENCE-011-001')
-    envelope = execution.prompt_envelope.to_dict()
-    raw = json.dumps(deterministic_response(execution.prompt_envelope), ensure_ascii=False)
-    run = flow.run_evidence
-    task = dict(id=run.analysis_run_id, stock_id=run.stock_id, task_date='2026-10-03',
-                prompt_version=run.prompt_version, model_version=run.model_version,
-                status=execution.status, created_by='fixture-creator-011', created_at=run.created_at,
-                run_evidence_json=encode(run.to_dict()), validated_draft_json=encode(flow.draft.to_dict()),
-                prompt_envelope_json=encode(envelope), raw_model_output=raw)
-    rows = [('analysis_tasks', task)]
-    for evidence in source_records(run):
-        value = asdict(evidence)
-        metadata = {key:value[key] for key in ('endpoint_or_tool','request_params','provider_timestamp',
-                    'validation_result','raw_response_hash','normalized_data_hash','analysis_output_hash')}
-        rows.append(('evidence_records', dict(id=evidence.evidence_id, analysis_report_id=None,
-            source=evidence.source.value, timestamp=evidence.request_timestamp,
-            raw_data_path=evidence.raw_response_path, calculation=encode({'normalization_rule':value['normalization_rule']}),
-            model_version=evidence.model_version, human_confirm=evidence.human_confirm.value,
-            collection_task_id=evidence.collection_task_id, system_run_id=evidence.system_run_id,
-            created_at=STAMP, metadata_json=encode(metadata), supersedes_evidence_id=evidence.supersedes_evidence_id)))
-    rows.extend(revision_rows(flow, prepared, final))
-    return execution, flow, prepared, final, rows
-
-def revision_rows(flow, prepared, final):
-    snapshot, evidence, conclusion = final.snapshot, final.evidence, final.conclusion
-    report = dict(id=snapshot.analysis_report_id, task_id=snapshot.analysis_run_id,
-        **{key:encode(value) for key,value in snapshot.to_dict()['seven_fields'].items()},
-        human_confirm=snapshot.human_confirm.value, created_at=snapshot.confirmed_at,
-        revision_id=snapshot.revision_id, model_version=conclusion.model_version,
-        calculation=encode(conclusion.calculation), evidence_ids=encode(conclusion.evidence_ids),
-        supersedes_analysis_report_id=snapshot.supersedes_analysis_report_id,
-        final_snapshot_hash=snapshot.final_snapshot_hash, final_evidence_id=evidence.final_evidence_id)
-    rows = [('analysis_reports', report)]  # Deferred forward references exercise COMMIT.
-    for override in flow.human_overrides:
-        row = override.to_dict()
-        for key in ('replacement','referenced_evidence_ids'):row[key]=encode(row[key])
-        rows.append(('analysis_human_overrides', row))
-    for candidate,kind,hash_key in ((prepared,'PREPARED','prepared_snapshot_hash'),
-                                   (snapshot,'FINAL','final_snapshot_hash')):
-        rows.append(('analysis_snapshots', dict(snapshot_hash=getattr(candidate,hash_key),
-            snapshot_kind=kind, analysis_run_id=candidate.analysis_run_id,
-            analysis_report_id=candidate.analysis_report_id, revision_id=candidate.revision_id,
-            payload_json=encode(candidate.to_dict()))))
-    for ordinal,event in enumerate(flow.events):
-        rows.append(('analysis_confirmation_events', dict(**event.to_dict(),event_sequence=ordinal)))
-    row=evidence.to_dict()
-    for key in ('input_evidence_ids','used_evidence_ids'):row[key]=encode(row[key])
-    rows.append(('analysis_final_evidence',row))
-    return rows
-
-class ResumeSchemaTests(unittest.TestCase):
-    def setUp(self):
-        self.db=sqlite3.connect(':memory:')
-        self.addCleanup(self.db.close)
-        self.db.row_factory=sqlite3.Row
-        self.db.executescript(schema.TEST_SCHEMA_DDL)
-        self.execution,self.flow,self.prepared,self.final,self.rows=fixture()
-
-    def commit_fixture(self):
-        self.db.execute('BEGIN')
-        for table,row in self.rows:insert(self.db,table,row)
-        self.db.commit()
-
-    def test_01_import_has_no_connection_or_io(self):
-        with patch('sqlite3.connect',side_effect=AssertionError('no connection')):
-            importlib.reload(schema)
-        tree=ast.parse(Path('persistence/schema_v1_1.py').read_text())
-        self.assertFalse(any(isinstance(n,(ast.Import,ast.ImportFrom)) for n in ast.walk(tree)))
-        self.assertFalse(any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name)
-                             and n.func.id in ('open','exec','eval','__import__') for n in ast.walk(tree)))
-        with self.assertRaisesRegex(AssertionError,'FORBIDDEN'):sqlite3.connect('stock_analysis.db')
-
-    def test_02_gate32_exactly_seven_new_tables(self):
-        actual={r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        self.assertEqual(schema.NEW_TABLES,EXPECTED)
-        self.assertEqual(actual,set(EXPECTED))
-        self.assertEqual(len(schema.INSERT_ONLY_TABLES),5)
-        self.assertNotIn('analysis_conclusions',actual)
-        self.assertEqual(self.db.execute('PRAGMA foreign_keys').fetchone()[0],1)
-        self.assertEqual(self.db.execute('PRAGMA recursive_triggers').fetchone()[0],1)
-
-    def test_03_roundtrip_run_draft_input_and_raw_hashes(self):
-        self.commit_fixture()
-        row=self.db.execute('SELECT * FROM analysis_tasks').fetchone()
-        run=json.loads(row['run_evidence_json']); draft=json.loads(row['validated_draft_json'])
-        self.assertEqual(run,self.flow.run_evidence.to_dict())
-        self.assertEqual(draft,self.flow.draft.to_dict())
-        self.assertEqual(row['id'],run['analysis_run_id'])
-        self.assertEqual(digest(draft['output']),run['validated_output_hash'])
-        self.assertEqual(hashlib.sha256(row['raw_model_output'].encode('utf-8')).hexdigest(),run['model_output_hash'])
-        envelope=json.loads(row['prompt_envelope_json'])
-        for key in ('input_hash','NETWORK_CALL_COUNT','MODEL_CALL_COUNT','DATABASE_WRITE'):envelope.pop(key)
-        self.assertEqual(digest(envelope),run['input_hash'])
-        self.assertNotIn('_gate_digest',run)
-
-    def test_04_roundtrip_prepared_and_final_hashes(self):
-        self.commit_fixture()
-        for kind,candidate,hash_key in (('PREPARED',self.prepared,'prepared_snapshot_hash'),
-                                        ('FINAL',self.final.snapshot,'final_snapshot_hash')):
-            with self.subTest(kind=kind):
-                row=self.db.execute('SELECT * FROM analysis_snapshots WHERE snapshot_kind=?',(kind,)).fetchone()
-                payload=json.loads(row['payload_json'])
-                self.assertEqual(payload,candidate.to_dict())
-                self.assertEqual(payload['final_state'],kind)
-                self.assertEqual(payload['confirmation_log_hash'],digest(payload['confirmation_events']))
-                claimed=payload.pop(hash_key)
-                self.assertEqual(claimed,digest(payload))
-                self.assertEqual(row['snapshot_hash'],claimed)
-
-    def test_05_seven_fields_original_modified_rejected(self):
-        self.commit_fixture()
-        row=self.db.execute('SELECT * FROM analysis_reports').fetchone()
-        for key,value in self.final.snapshot.to_dict()['seven_fields'].items():
-            self.assertEqual(json.loads(row[key]),value)
-        self.assertEqual(json.loads(row['risk_level'])['DECISION'],'MODIFIED')
-        self.assertEqual(json.loads(row['risk_level'])['ORIGIN'],'HUMAN')
-        self.assertIsNone(json.loads(row['operation_plan'])['EFFECTIVE_VALUE'])
-        self.assertEqual(json.loads(row['evidence_ids']),list(self.final.conclusion.evidence_ids))
-        self.assertEqual(json.loads(row['calculation']),json.loads(encode(self.final.conclusion.calculation)))
-
-    def test_06_event_order_enums_and_timezone(self):
-        self.commit_fixture()
-        rows=list(self.db.execute('SELECT * FROM analysis_confirmation_events ORDER BY event_sequence'))
-        self.assertEqual([r['event_sequence'] for r in rows],list(range(len(self.flow.events))))
-        for row,event in zip(rows,self.flow.events):
-            restored=dict(row);restored.pop('event_sequence')
-            self.assertEqual(restored,event.to_dict())
-            self.assertEqual(row['created_at'],STAMP)
-            self.assertIsNotNone(datetime.fromisoformat(row['created_at']).utcoffset())
-            self.assertIsInstance(HumanConfirm(row['current_state']),HumanConfirm)
-        self.assertEqual(digest([e.to_dict() for e in self.flow.events]),self.final.snapshot.confirmation_log_hash)
-
-    def test_07_overrides_and_provider_metadata_roundtrip(self):
-        self.commit_fixture()
-        stored=dict(self.db.execute('SELECT * FROM analysis_human_overrides').fetchone())
-        for key in ('replacement','referenced_evidence_ids'):stored[key]=json.loads(stored[key])
-        self.assertEqual(stored,self.flow.human_overrides[0].to_dict())
-        for original in source_records(self.flow.run_evidence):
-            row=self.db.execute('SELECT * FROM evidence_records WHERE id=?',(original.evidence_id,)).fetchone()
-            metadata=json.loads(row['metadata_json'])
-            self.assertEqual(row['source'],original.source.value)
-            self.assertEqual(metadata['raw_response_hash'],original.raw_response_hash)
-            self.assertEqual(metadata['normalized_data_hash'],original.normalized_data_hash)
-            self.assertIsNone(metadata['analysis_output_hash'])
-            self.assertIsNone(metadata['provider_timestamp'])
-            self.assertEqual(metadata['validation_result'],{'status':'PASS','failures':[]})
-            self.assertEqual(json.loads(row['calculation'])['normalization_rule'],list(original.normalization_rule))
-
-    def test_08_final_evidence_is_distinct_and_roundtrips(self):
-        self.commit_fixture()
-        row=dict(self.db.execute('SELECT * FROM analysis_final_evidence').fetchone())
-        for key in ('input_evidence_ids','used_evidence_ids'):row[key]=json.loads(row[key])
-        self.assertEqual(row,self.final.evidence.to_dict())
-        self.assertNotIn('source',row)
-        self.assertEqual(len(EvidenceSource),3)
-        invalid=next(dict(r) for t,r in self.rows if t=='evidence_records')
-        invalid.update(id='HUMAN-EVIDENCE-FORBIDDEN',source='HUMAN')
-        with self.assertRaises(sqlite3.IntegrityError):insert(self.db,'evidence_records',invalid)
-
-    def test_09_only_task_status_update_allowed(self):
-        self.commit_fixture()
-        self.db.execute("UPDATE analysis_tasks SET status='ARCHIVED'")
-        self.assertEqual(self.db.execute('SELECT status FROM analysis_tasks').fetchone()[0],'ARCHIVED')
-        for table in EXPECTED:
-            columns=[r[1] for r in self.db.execute(f'PRAGMA table_info({table})')]
-            for column in columns:
-                if table=='analysis_tasks' and column=='status':continue
-                with self.subTest(table=table,column=column),self.assertRaisesRegex(sqlite3.IntegrityError,'UPDATE_FORBIDDEN'):
-                    self.db.execute(f'UPDATE {table} SET {column}={column}')
-            with self.subTest(table=table),self.assertRaisesRegex(sqlite3.IntegrityError,'DELETE_FORBIDDEN'):
-                self.db.execute(f'DELETE FROM {table}')
-
-    def test_10_replace_cannot_overwrite_immutable_identity(self):
-        self.commit_fixture()
-        for table,row in self.rows:
-            with self.subTest(table=table),self.assertRaisesRegex(sqlite3.IntegrityError,'IMMUTABLE_IDENTITY'):
-                self.db.execute(f'INSERT OR REPLACE INTO {table} ({",".join(row)}) VALUES ({",".join("?" for _ in row)})',tuple(row.values()))
-
-    def test_11_rollback_failure_at_every_insert_step(self):
-        for failure in range(len(self.rows)):
-            with self.subTest(failure=failure):
-                self.db.execute('BEGIN')
-                try:
-                    for step,(table,row) in enumerate(self.rows):
-                        insert(self.db,table,row)
-                        if step==failure:raise RuntimeError('injected transaction failure')
-                    self.fail('injection was not reached')
-                except RuntimeError:self.db.rollback()
-                for table in EXPECTED:self.assertEqual(self.db.execute(f'SELECT count(*) FROM {table}').fetchone()[0],0)
-
-    def test_12_deferred_commit_failure_rolls_back(self):
-        self.db.execute('BEGIN')
-        for table,row in self.rows:
-            if table!='analysis_final_evidence':insert(self.db,table,row)
-        with self.assertRaises(sqlite3.IntegrityError):self.db.commit()
-        self.db.rollback()
-        for table in EXPECTED:self.assertEqual(self.db.execute(f'SELECT count(*) FROM {table}').fetchone()[0],0)
-
-    def test_13_pending_events_and_prepared_before_final_report(self):
-        self.db.execute('BEGIN')
-        for table,row in self.rows:
-            if table in ('analysis_tasks','evidence_records','analysis_human_overrides') or (
-                    table=='analysis_snapshots' and row['snapshot_kind']=='PREPARED') or (
-                    table=='analysis_confirmation_events' and row['target']!='FINAL_REPORT'):
-                insert(self.db,table,row)
-        self.db.commit()
-        self.assertEqual(self.db.execute('SELECT count(*) FROM analysis_reports').fetchone()[0],0)
-        self.assertGreater(self.db.execute('SELECT count(*) FROM analysis_confirmation_events').fetchone()[0],0)
-
-    def test_14_correction_revision_preserves_history_and_explicit_links(self):
-        self.commit_fixture()
-        old=self.db.execute('SELECT payload_json FROM analysis_snapshots WHERE snapshot_kind=\'FINAL\'').fetchone()[0]
-        correction=self.flow.reject('market_view','REVIEW_FIELD',actor_id=ACTOR,
-                                    reason='事后发现原判断需修订',created_at=STAMP)
-        insert(self.db,'analysis_confirmation_events',dict(**correction.to_dict(),
-               event_sequence=len(self.flow.events)-1))
-        self.db.commit()
-        flow=self.flow.new_revision(analysis_report_id='REPORT-011-002')
-        confirm_remaining(flow)
-        prepared=flow.prepare_final_snapshot()
-        flow.confirm_final_report(prepared,actor_id=ACTOR,created_at=STAMP)
-        final=finalize_analysis(flow,prepared,evidence_records=source_records(flow.run_evidence),
-                                final_evidence_id='FINAL-EVIDENCE-011-002')
-        self.db.execute('BEGIN')
-        for table,row in revision_rows(flow,prepared,final):insert(self.db,table,row)
-        self.db.commit()
-        report=self.db.execute('SELECT * FROM analysis_reports WHERE id=?',(final.snapshot.analysis_report_id,)).fetchone()
-        evidence=self.db.execute('SELECT * FROM analysis_final_evidence WHERE final_evidence_id=?',(final.evidence.final_evidence_id,)).fetchone()
-        self.assertEqual(report['supersedes_analysis_report_id'],self.final.snapshot.analysis_report_id)
-        self.assertEqual(evidence['supersedes_final_evidence_id'],self.final.evidence.final_evidence_id)
-        self.assertNotEqual(report['revision_id'],self.final.snapshot.revision_id)
-        self.assertEqual(self.db.execute('SELECT payload_json FROM analysis_snapshots WHERE snapshot_hash=?',
-                        (self.final.snapshot.final_snapshot_hash,)).fetchone()[0],old)
-        self.assertEqual(list(self.db.execute('PRAGMA foreign_key_check')),[])
-
-    def test_15_missing_supersedes_target_is_rejected(self):
-        self.commit_fixture()
-        row=next(dict(r) for t,r in self.rows if t=='evidence_records')
-        row.update(id='NEW-EVIDENCE',supersedes_evidence_id='MISSING-PREDECESSOR')
-        with self.assertRaises(sqlite3.IntegrityError):insert(self.db,'evidence_records',row)
-
-    def test_16_stable_json_and_invalid_json(self):
-        value={'中文':{'array':[None,True,1,1.0],'time':STAMP},'first':'文本'}
-        canonical=encode(value)
-        self.assertEqual(canonical,encode(dict(reversed(list(value.items())))))
-        decoded=OutputParser().parse(self.db.execute('SELECT CAST(? AS TEXT)',(canonical,)).fetchone()[0])
-        self.assertEqual(encode(decoded),canonical)
-        self.assertEqual(digest(decoded),digest(value))
-        for invalid in ('{"a":1,"a":2}','{"a":1,"\\u0061":2}','{"x":NaN}',
-                        '{"x":Infinity}','{"x":1e999}'):
-            with self.subTest(invalid=invalid),self.assertRaises(ValueError):OutputParser().parse(invalid)
-        for invalid in ({1:'value'},{'x':float('nan')},{'x':float('inf')}):
-            with self.assertRaises(ValueError):encode(invalid)
-
-    def test_17_real_inventory_projection_complete_without_business_counts(self):
-        text=Path('docs/DB_COMPATIBILITY_MAPPING_011.md').read_text()
-        block=text.split('<!-- G0_INVENTORY_BEGIN -->',1)[1].split('<!-- G0_INVENTORY_END -->',1)[0]
-        data=json.loads(block.split('```json\n',1)[1].split('\n```',1)[0])
-        self.assertEqual(len(data['tables']),data['table_count'])
-        self.assertEqual(data['table_count'],32)
-        self.assertTrue(set(EXPECTED).isdisjoint(t['name'] for t in data['tables']))
-        self.assertEqual(sum(len(t['indexes']) for t in data['tables']),226)
-        self.assertEqual(sum(len(t['foreign_keys']) for t in data['tables']),11)
-        self.assertTrue(all('row_count' not in t for t in data['tables']))
-        self.assertEqual(data['quick_check'],'ok')
-        self.assertEqual(data['journal_mode'],'wal')
-        canonical=json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(',',':'))
-        self.assertIn(hashlib.sha256(canonical.encode()).hexdigest(),text)
-        local=Path('docs/freeze/DB_EXISTING_SCHEMA_INVENTORY_V1.json')
-        if local.exists():  # PR checkout needs only the embedded projection.
-            raw=local.read_bytes()
-            self.assertEqual(hashlib.sha256(raw).hexdigest(),'c9eaf6d1bc8927c8c0dbdb6dd0404ddc52751b2bcefbbad1c5b66a406fbadbd2')
-            original=json.loads(raw)
-            self.assertEqual(data['tables'],[{k:t[k] for k in ('name','columns','primary_key','indexes','foreign_keys')}
-                                            for t in original['tables']])
-
-    def test_18_gates31_33_34_35_and_scope(self):
-        frozen=Path('docs/frozen/DB_SCHEMA_V1.1.md').read_text()
-        for marker in ('VERSION=V1.1','STATUS=FROZEN_FOR_IMPLEMENTATION','SUPERSEDES=DB_SCHEMA_V1.0',
-                       'CHANGE_REASON=PERSISTENCE_G0_BLOCKED_UNFREEZE','MIGRATION_POLICY=ADDITIVE_ONLY'):
-            self.assertIn(marker,frozen)
-        for table in EXPECTED:
-            self.assertIn('### '+table,frozen)
-            for definition in schema.TABLE_DEFINITIONS[table]:
-                if not definition.startswith(('CHECK(', 'UNIQUE(')):self.assertIn('`'+definition.split()[0]+'`',frozen)
-        decision=Path('docs/decisions/DB_SCHEMA_V1_1_PERSISTENCE_UNFREEZE_20261003.md').read_text()
-        for marker in ('#011_SCHEMA_UNFREEZE_DECISION=APPROVED','QI_DECISION=OPTION_A',
-                       'DB_SCHEMA_TARGET=V1.1','UNFREEZE_SCOPE=DB_SCHEMA_ONLY'):self.assertIn(marker,decision)
-        self.assertIn('只有 PERSISTENCE_READINESS=READY 才允许定义 #012 正式 migration',frozen)
-        self.assertFalse(re.search(r'\b(DROP|ALTER)\s+(TABLE|INDEX)|\bRENAME\s+TO',schema.TEST_SCHEMA_DDL,re.I))
-        original=subprocess.check_output(['git','show',BASELINE+':docs/frozen/DB_SCHEMA_V1.0.md'])
-        self.assertEqual(Path('docs/frozen/DB_SCHEMA_V1.0.md').read_bytes(),original)
-        changed=subprocess.check_output(['git','diff',BASELINE,'--name-only']).decode().splitlines()
-        self.assertTrue(set(changed)<=WHITELIST,changed)
-        self.assertFalse(any(Path('migration').glob('*.sql')))
-
-if __name__ == '__main__':
-    unittest.main(verbosity=2)
-```
-<!-- RESUME_TESTS_END -->
 
 ## RESUME 最终验证与验收结论（2026-10-03）
 
@@ -632,7 +241,8 @@ if __name__ == '__main__':
 PERSISTENCE_READINESS=READY
 EXECUTION_STATUS=RESUME_AUTHORIZED
 BASELINE_TESTS=528/528 PASS
-RESUME_CONTRACT_TESTS=18/18 PASS
+RESUME_CONTRACT_TESTS=20/20 PASS
+TOTAL_DISCOVERED_TESTS=548/548 PASS
 DB_SCHEMA_V1_1=PASS
 NEW_TABLES_EXACTLY=analysis_tasks,analysis_reports,evidence_records,analysis_confirmation_events,analysis_human_overrides,analysis_snapshots,analysis_final_evidence
 LEGACY_32_TABLES_CHANGE=0
@@ -647,16 +257,18 @@ REAL_DB_DML=0
 MIGRATION_APPLY=0
 ```
 
-main 基线 `python3 -B -m unittest discover -s tests`：528 tests，44.493 秒，OK。
-上述文档内新增契约测试：18 tests，7.094 秒，OK；含每个 INSERT 步骤失败回滚及 deferred COMMIT
-失败回滚、真实 #009/#010 synthetic 对象的 JSON/hash/ID/enum/timezone/revision 往返。
+GPT Review B 返修验证：`python3 -B -m unittest discover -s tests`：548 tests，50.671 秒，OK；
+其中原 main 基线 528/528、新契约测试 20/20 全过。契约测试单独运行：20 tests，9.143 秒，OK。
+原 18 项已迁入可自动发现的 unittest 文件，另增 B2 重复 PREPARED / one-FINAL 与 B3 多后继
+回归；FK 与 no-self-reference 负向验证覆盖三个 supersedes 字段。保留每个 INSERT 步骤失败
+回滚及 deferred COMMIT 失败回滚、#009/#010 synthetic 对象 JSON/hash/ID/enum/timezone/revision 往返。
 测试只在 :memory: 对明确获批的新七表执行 DDL/DML；生产 DDL/DML=0。
 
 | Gate | 结果 / 证据 |
 | --- | --- |
-| 31 DB_SCHEMA_V1_1 | PASS：完整版本/状态/原因、七表 94 个字段定义、payload 公共字段及冻结约束；test_18 |
+| 31 DB_SCHEMA_V1_1 | PASS：完整版本/状态/原因、七表 93 个字段定义、payload 公共字段及冻结约束；test_18 |
 | 32 NEW_TABLES_EXACTLY | PASS：NEW_TABLES 与 sqlite_master 精确七表；test_02 |
-| 33 旧 32 表零改动 | PASS：仅五个 RESUME 白名单文件；schema DDL 只 CREATE 新七表与其索引/触发器，无 DROP/RENAME/ALTER；V1.0 字节不变，inventory 原 hash 不变；test_17/18 |
+| 33 旧 32 表零改动 | PASS：仅原五个 RESUME 白名单文件及获批新增测试文件；schema DDL 只 CREATE 新七表与其索引/触发器，无 DROP/RENAME/ALTER；V1.0 字节不变，inventory 原 hash 不变；test_17/18 |
 | 34 READY 前置 | PASS：当前映射契约 READY，#012 正式 migration 只允许在该状态后定义；本轮没有 migration/*.sql、真实库连接或迁移应用；test_18 |
 | 35 解冻决策 | PASS：APPROVED / OPTION_A / V1.1 / DB_SCHEMA_ONLY 均见独立决策记录；test_18 |
 
@@ -673,9 +285,22 @@ ConfirmationReadRepository 提供 pending_confirmations / confirmation_history /
 当前派生状态与生成时 CONFIRMED、拒绝/被取代 revision；链或 hash 异常不得标有效。
 接口定义沿用上述 G0 要求并由 V1.1 提供明确 backing，实现属于 #012，#011 不建 Dashboard。
 
-## 交付环境状态
+## GPT Review B 增量返修
 
-契约/测试已完成，schema readiness 仍为 READY；远端发布未完成。
+B1：删除 evidence_records 数据库元数据列；endpoint_or_tool / request_params /
+provider_timestamp / validation_result / hashes 的唯一权威载体仍为冻结 Evidence Pipeline
+metadata sidecar。B2：恢复 UNIQUE(analysis_report_id, revision_id, snapshot_kind)，
+snapshot_kind 是既有 snapshot_type 列名；保留 one-FINAL-per-report。B3：三个 supersedes
+列删除 UNIQUE，保留 FK/no-self-reference，允许多后继，DOMAIN_LOGIC_CHANGE=NO。
+
+只在 codex/v1-persistence-readiness-011 上基于 48ef1db 增量返修，沿用 PR #19，
+不新建分支或 PR。提交仅含原五个 RESUME 白名单文件及本次授权新增的测试文件。
+真实库连接/DDL/DML=0；仅 :memory: 执行测试 DDL/DML；旧 32 表、G0 inventory 投影、
+DB_SCHEMA_V1.0、Evidence Pipeline 与 domain logic 均未修改。当前提交与 push 结果见执行总结。
+
+## 上次交付环境状态（历史记录）
+
+以下是返修前的交付记录；用户已提供现有 PR #19，本轮沿用，不再创建 PR。
 
 ```text
 DELIVERY_STATUS=LOCAL_COMMITTED_REMOTE_PUBLICATION_BLOCKED

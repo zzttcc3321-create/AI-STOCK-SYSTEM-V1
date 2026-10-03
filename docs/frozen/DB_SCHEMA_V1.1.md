@@ -83,7 +83,7 @@ DDL 唯一可执行副本在 [schema_v1_1.py](../../persistence/schema_v1_1.py)�
 | `model_version` | `TEXT NOT NULL` | AnalysisConclusion.model_version = FinalAnalysisSnapshot.model_version |
 | `calculation` | `TEXT NOT NULL` | AnalysisConclusion.calculation 完整 JSON object（#010 已有键，不借 reasoning） |
 | `evidence_ids` | `TEXT NOT NULL` | AnalysisConclusion.evidence_ids 的有序 JSON array = run.used_evidence_ids |
-| `supersedes_analysis_report_id` | `TEXT UNIQUE REFERENCES analysis_reports(id)` | FinalAnalysisSnapshot.supersedes_analysis_report_id；显式 FK |
+| `supersedes_analysis_report_id` | `TEXT REFERENCES analysis_reports(id)` | FinalAnalysisSnapshot.supersedes_analysis_report_id；显式 FK |
 | `final_snapshot_hash` | `TEXT NOT NULL UNIQUE REFERENCES analysis_snapshots(snapshot_hash) DEFERRABLE INITIALLY DEFERRED` | FinalAnalysisSnapshot.final_snapshot_hash；关联 FINAL snapshot |
 | `final_evidence_id` | `TEXT NOT NULL UNIQUE REFERENCES analysis_final_evidence(final_evidence_id) DEFERRABLE INITIALLY DEFERRED` | FinalAnalysisEvidence.final_evidence_id；显式关联最终证据 |
 
@@ -104,8 +104,7 @@ DDL 唯一可执行副本在 [schema_v1_1.py](../../persistence/schema_v1_1.py)�
 | `collection_task_id` | `TEXT` | EvidenceRecord.collection_task_id；opaque ID，禁止虚构旧 collection_tasks FK |
 | `system_run_id` | `TEXT` | EvidenceRecord.system_run_id；opaque ID，禁止复用 screening_runs |
 | `created_at` | `TEXT NOT NULL` | 调用方显式 persistence envelope.evidence_created_at，非猜测的 Provider 时间 |
-| `metadata_json` | `TEXT NOT NULL` | JSON object：endpoint_or_tool / request_params / provider_timestamp / validation_result / raw_response_hash / normalized_data_hash / analysis_output_hash；直接取 EvidenceRecord 同名字段；validation_result={status,failures} |
-| `supersedes_evidence_id` | `TEXT UNIQUE REFERENCES evidence_records(id)` | EvidenceRecord.supersedes_evidence_id；显式 FK，旧证据不变 |
+| `supersedes_evidence_id` | `TEXT REFERENCES evidence_records(id)` | EvidenceRecord.supersedes_evidence_id；显式 FK，旧证据不变 |
 
 表级约束：`CHECK(supersedes_evidence_id IS NULL OR supersedes_evidence_id <> id)`。
 
@@ -161,7 +160,10 @@ DDL 唯一可执行副本在 [schema_v1_1.py](../../persistence/schema_v1_1.py)�
 | `revision_id` | `TEXT NOT NULL` | 相应 snapshot.revision_id |
 | `payload_json` | `TEXT NOT NULL` | PreparedFinalSnapshot.to_dict() 或 FinalAnalysisSnapshot.to_dict() 完整公开 JSON object；字段列表见下 |
 
-表级约束：`CHECK(length(snapshot_hash) = 64 AND snapshot_hash NOT GLOB '*[^0-9a-f]*')`。
+表级约束：`CHECK(length(snapshot_hash) = 64 AND snapshot_hash NOT GLOB '*[^0-9a-f]*')`，
+`UNIQUE(analysis_report_id, revision_id, snapshot_kind)`（snapshot_kind 即契约中的 snapshot_type）。
+同一 report revision 至多一个 PREPARED candidate；保留 `snapshot_kind = 'FINAL'` 时
+`analysis_report_id` 的 partial UNIQUE index，每 report 至多一个 FINAL。
 
 ### analysis_final_evidence
 
@@ -181,7 +183,7 @@ DDL 唯一可执行副本在 [schema_v1_1.py](../../persistence/schema_v1_1.py)�
 | `used_evidence_ids` | `TEXT NOT NULL` | FinalAnalysisEvidence.used_evidence_ids；有序 JSON array；须为 input 子集 |
 | `confirmed_by` | `TEXT NOT NULL` | FinalAnalysisEvidence.confirmed_by |
 | `confirmed_at` | `TEXT NOT NULL` | FinalAnalysisEvidence.confirmed_at |
-| `supersedes_final_evidence_id` | `TEXT UNIQUE REFERENCES analysis_final_evidence(final_evidence_id)` | FinalAnalysisEvidence.supersedes_final_evidence_id |
+| `supersedes_final_evidence_id` | `TEXT REFERENCES analysis_final_evidence(final_evidence_id)` | FinalAnalysisEvidence.supersedes_final_evidence_id |
 | `human_confirm` | `TEXT NOT NULL CHECK(human_confirm = 'CONFIRMED')` | FinalAnalysisEvidence.human_confirm |
 
 表级约束：`CHECK(supersedes_final_evidence_id IS NULL OR supersedes_final_evidence_id <> final_evidence_id)`。
@@ -207,7 +209,9 @@ final_evidence_id、prepared_snapshot_hash、confirmation_events、supersedes_an
 #010 对象均 DB-resident 于新七表；_gate_digest 仅 IN-MEMORY-only，不能存后重造 Gate 凭证。
 反序列化只返回只读 DTO，不凭 hash 自动恢复可继续操作的 sealed domain 对象。
 Provider 原始响应仍由已有 raw_data_path 引用，属既有 SIDECAR-resident 原始材料；
-metadata_json 将既有 EvidenceRecord 元数据无损绑定在 DB 内，不新增 sidecar 写入协议。
+EvidenceRecord 的 endpoint_or_tool / request_params / provider_timestamp / validation_result /
+raw_response_hash / normalized_data_hash / analysis_output_hash 唯一权威载体仍是冻结
+Evidence Pipeline 的 metadata sidecar，不增设数据库元数据副本，不改变既有 sidecar 协议。
 #010 对象不藏在 Provider sidecar，不塞 reasoning，不混为 EvidenceRecord。
 HUMAN != EvidenceSource：HUMAN 仅 override.origin / 七字段 ORIGIN；Provider Source 仍只有三源。
 FinalAnalysisEvidence 是 analysis-level 对象，有独立表、ID、hash 与 supersedes 链，不是第四源。
@@ -233,8 +237,9 @@ analysis_tasks 除 status 外所有列不可 UPDATE，任务也不可 DELETE。s
 每次纠错追加 confirmation event；正式纠错创建新 report_id、revision_id、final_evidence_id，
 使用显式 supersedes_analysis_report_id / supersedes_final_evidence_id。两个链都不能塞无关 JSON。
 旧 final snapshot / conclusion / confirmation log/hash 不变。旧 evidence 修正也追加新 evidence_id
-及 supersedes_evidence_id。UNIQUE predecessor 保证一个已提交后继；并发冲突回滚，不能用 timestamp
-或 ID 字典序选择胜者。候选多个 PREPARED snapshot 可同 revision 共存，但每 report 至多一个 FINAL。
+及 supersedes_evidence_id。三个 supersedes 字段允许多个后继，保留 FK 和 no-self-reference
+检查；persistence 不引入单后继规则，DOMAIN_LOGIC_CHANGE=NO。不能用 timestamp 或 ID 字典序
+选择胜者。同一 report revision 至多一个 PREPARED candidate，每 report 至多一个 FINAL。
 
 确认日志 event_sequence 按 report/revision 连续递增；相同 created_at 不影响稳定顺序。
 FINAL payload.confirmation_events 是生成时有序前缀，后续事件追加到日志表，不修改旧 snapshot。

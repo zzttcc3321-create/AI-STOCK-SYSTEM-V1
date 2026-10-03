@@ -37,7 +37,7 @@ RESUME 明确记录 qi 选择 OPTION A：解冻 DB Schema，在最小范围内�
 | --- | --- |
 | analysis_tasks | #009 运行、ValidatedAnalysisDraft、AnalysisRunEvidence 及 hash 重算输入 |
 | analysis_reports | 七字段最终报告与 AnalysisConclusion.id / calculation / revision |
-| evidence_records | 三源 Provider Evidence，完整 metadata 与 evidence revision |
+| evidence_records | 三源 Provider Evidence 的 DB 字段与 evidence revision；metadata 保留冻结 sidecar |
 | analysis_confirmation_events | 有序 append-only ConfirmationEvent |
 | analysis_human_overrides | HumanOverride 的原值 hash、replacement、理由、引用 |
 | analysis_snapshots | PREPARED / FINAL 两类完整不可变载荷 |
@@ -64,7 +64,8 @@ G0 BLOCKED 历史证据保留，恢复状态 RESUME_AUTHORIZED；契约与测试
 
 #011 只交付本决策、冻结候选、真实 inventory 文档投影、映射、审计更新和 schema_v1_1.py。
 该模块仅导出 :memory: 测试 DDL，不连接任何 DB，无 migration SQL、repository、domain 修改。
-新增验收测试保存于已授权审计文档代码块，避免增加 RESUME 范围之外的文件。
+GPT Review B 返修授权新增 tests/test_persistence_schema_v1_1.py；原 18 项契约测试
+从审计文档迁入自动发现文件，并补 B2/B3 回归。Evidence Pipeline 仍冻结，domain logic 不变。
 
 #012 负责正式 migration/*.sql、真实 DB 的 WAL-safe backup、受控迁移、repository、事务原子性、
 read-model；顺序为 V1.1 schema → WAL-safe backup → controlled migration → repository implementation
