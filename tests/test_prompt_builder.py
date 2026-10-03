@@ -13,13 +13,70 @@ from unittest.mock import patch
 from analysis import AnalysisInputError, AnalysisPackage, AnalysisPackageBuilder, PromptBuilder
 from analysis.contracts import stable_json
 from analysis.prompt_builder import PROMPT_VERSION, TEMPLATE_PATH, TEMPLATE_SHA256
-from test_analysis_package import metadata, package_arguments
+from test_analysis_package import metadata, package_arguments, information_package_arguments
+from evidence import EvidenceValidationResult, ValidationStatus
 
 
 class PromptBuilderTests(unittest.TestCase):
     def setUp(self):
         self.builder = PromptBuilder()
         self.package = AnalysisPackageBuilder().build(**package_arguments())
+
+    def test_information_gate_end_to_end_only_canonical_and_six_evidence_fields(self):
+        package = AnalysisPackageBuilder().build(**information_package_arguments())
+        envelope = self.builder.build(package)
+        inputs = self.builder.inputs(package)
+        self.assertEqual(len(inputs["financial_data"]["records"]), 3)
+        for field in ("recent_announcements", "recent_news", "research_summary"):
+            row = inputs["intelligence_data"][field]["records"][0]["data"]
+            self.assertEqual(row["title"], "真实结构示意标题")
+            self.assertEqual(row["source_supplied_summary"], "源提供摘要")
+            self.assertEqual(row["MODEL_GENERATED_SUMMARY"], "NO")
+        for field in ("valuation_summary", "sector_context"):
+            self.assertEqual(inputs["intelligence_data"][field]["status"], "MISSING")
+        for item in inputs["evidence_index"]:
+            self.assertEqual(set(item), set(metadata()))
+        for text in ("raw_response", "raw_bytes", "payload", "API Key", "session", "cookie",
+                     "request_params", "source_evidence_id", "statement_entries", "链接", "时间"):
+            self.assertNotIn(text, envelope.user_prompt)
+        self.assertEqual(envelope.MODEL_CALL_COUNT, 0)
+        self.assertEqual(envelope.NETWORK_CALL_COUNT, 0)
+        self.assertEqual(envelope.DATABASE_WRITE, 0)
+
+    def test_failed_information_evidence_never_enters_prompt(self):
+        arguments = information_package_arguments()
+        evidence = arguments["evidence_metadata"][2]
+        arguments["evidence_metadata"][2] = replace(evidence,
+            validation_result=EvidenceValidationResult(ValidationStatus.FAIL))
+        package = AnalysisPackageBuilder().build(**arguments)
+        inputs = self.builder.inputs(package)
+        self.assertEqual(inputs["intelligence_data"]["recent_news"]["records"], [])
+        envelope = self.builder.build(package)
+        self.assertNotIn(evidence.evidence_id, envelope.evidence_ids)
+        self.assertEqual(inputs["data_quality_report"]["package_status"], "INCOMPLETE")
+
+    def test_sensitive_source_summary_is_rejected_before_rendering(self):
+        from test_information_normalizer import gate_information
+        result, evidence = gate_information(data=[["标题", "摘要"], ["示意标题", "session=hidden-value"]])
+        arguments = package_arguments()
+        arguments["canonical_information"] = [result]
+        arguments["evidence_metadata"].append(evidence)
+        arguments["evidence_links"]["recent_news.0"] = [evidence.evidence_id]
+        arguments["source_status"]["WORKBUDDY_TDX_MCP"] = "UNVERIFIED"
+        with self.assertRaises(AnalysisInputError):
+            AnalysisPackageBuilder().build(**arguments)
+
+    def test_information_assembly_never_calls_provider_or_network(self):
+        arguments = information_package_arguments()
+        with ExitStack() as stack:
+            mocks = [stack.enter_context(patch(name, side_effect=AssertionError("external access")))
+                     for name in ("providers.tdx_information.TdxInformationProvider.fetch",
+                                  "socket.create_connection", "urllib.request.urlopen")]
+            package = AnalysisPackageBuilder().build(**arguments)
+            envelope = self.builder.build(package)
+            self.assertEqual(envelope.MODEL_CALL_COUNT, 0)
+            for mocked in mocks:
+                mocked.assert_not_called()
 
     def test_exact_seven_inputs_from_one_package(self):
         inputs = self.builder.inputs(self.package)
