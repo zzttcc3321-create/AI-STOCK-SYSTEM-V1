@@ -8,8 +8,12 @@ from .archive_contracts import ArchiveIdentity, ArchiveError, require
 
 class ArchiveResolver:
     def __init__(self, root):
-        self.root = Path(os.path.abspath(root))
-        self.safe(self.root)
+        root = Path(root)
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        # Keep '..' until every original ancestor has passed lstat checks.
+        self.safe(root)
+        self.root = Path(os.path.realpath(root))
 
     def safe(self, path):
         path = Path(path)
