@@ -16,6 +16,8 @@ from bridge.contracts import (
     MAX_PACKET_BYTES, SOURCE, check_sensitive, identifier, map_snapshot, positive,
     stock_identifier, utc_now,
 )
+from evidence import ArchiveIdentity, ArchiveWriter
+from evidence.archive_contracts import plain
 from .contract import ContractError, ContractErrorCode, ProviderEnvelope, ProviderStatus
 from .interface import Provider
 
@@ -58,7 +60,8 @@ class LocalHTTPTransport:
 class TdxLocalHttpProvider(Provider):
     """No fallback, no automatic retries, no investment or unit inference."""
 
-    def __init__(self, transport=None, *, environ: Mapping[str, str] | None = None, clock=utc_now) -> None:
+    def __init__(self, transport=None, *, environ: Mapping[str, str] | None = None, clock=utc_now,
+                 archive_writer: ArchiveWriter | None = None) -> None:
         env = os.environ if environ is None else environ
         self.endpoint = env.get("TDX_LOCAL_ENDPOINT", "http://127.0.0.1:17709/")
         default_transport = LocalHTTPTransport(self.endpoint)
@@ -67,6 +70,7 @@ class TdxLocalHttpProvider(Provider):
         self.connect_timeout = positive(env.get("TDX_CONNECT_TIMEOUT", "3"), "connect timeout")
         self.read_timeout = positive(env.get("TDX_READ_TIMEOUT", "10"), "read timeout")
         self._clock = clock
+        self._archive = archive_writer
 
     def describe(self) -> Mapping[str, Any]:
         return {"provider_name": SOURCE, "data_kinds": ("realtime_quote",), "read_only": True,
@@ -100,6 +104,8 @@ class TdxLocalHttpProvider(Provider):
                 return result(ProviderStatus.VALIDATION_FAILED, ContractErrorCode.INVALID_DATA_KIND_SCOPE,
                               "TDX only supports realtime_quote")
             stock_id = stock_identifier(request.get("stock_id"))
+            if self._archive is not None and "evidence_id" in request:
+                identifier(request["evidence_id"])
             payload.update({"stock_id": stock_id, **{
                 field: identifier(request.get(field, uuid4().hex))
                 for field in ("request_id", "system_run_id", "collection_task_id")
@@ -115,12 +121,26 @@ class TdxLocalHttpProvider(Provider):
             data = self._transport.post(body, connect_timeout=self.connect_timeout, read_timeout=self.read_timeout)
             if not isinstance(data, bytes) or len(data) > MAX_PACKET_BYTES:
                 raise ValueError("invalid transport response")
+            try:
+                raw = json.loads(data)
+            except (ValueError, UnicodeError):
+                raw = None
+            if raw is not None:
+                check_sensitive(raw)
             payload["raw_response_b64"] = base64.b64encode(data).decode("ascii")
             payload["raw_response_hash"] = hashlib.sha256(data).hexdigest()
-            raw_reference = (f"tdx-local/{payload['system_run_id']}/{payload['collection_task_id']}/"
+            source_reference = (f"tdx-local/{payload['system_run_id']}/{payload['collection_task_id']}/"
                              f"{payload['request_id']}/raw.json")
-            raw = json.loads(data)
-            check_sensitive(raw)
+            payload["source_reference"] = source_reference
+            if self._archive is not None:
+                identity = ArchiveIdentity(payload["system_run_id"], payload["collection_task_id"],
+                                           payload["request_id"], request.get("evidence_id", uuid4().hex))
+                receipt = self._archive.write(
+                    identity=identity, source=SOURCE, raw_parts={"response": data},
+                    endpoint_or_tool="get_market_snapshot", request_params={"stock_id": stock_id},
+                    request_timestamp=at, source_reference=source_reference)
+                raw_reference = receipt["uri"]
+                payload["archive_record"] = plain(receipt["record"])
             if isinstance(raw, dict) and "id" in raw and raw["id"] != payload["request_id"]:
                 raise ValueError("RPC identity mismatch")
             snapshot = map_snapshot(raw)

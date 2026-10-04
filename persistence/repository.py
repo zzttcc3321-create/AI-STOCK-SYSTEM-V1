@@ -1,16 +1,18 @@
 """Append-only core. Synthetic Provider projections require a temporary DB.
 
-Real Provider Evidence writes are disabled until #012B supplies the archive
-contract. No API here reads, writes or resolves sidecars.
+Real Provider Evidence requires explicit runtime enable plus verified archive
+raw, metadata, normalized content and (for finalization) analysis bindings.
 """
 from datetime import date
 import hashlib
+from pathlib import Path, PureWindowsPath
 
 from analysis.analysis_evidence import validate_analysis_run_evidence
 from analysis.confirmation_contracts import aware_time, validate_confirmation_input, validate_prepared_snapshot
 from analysis.finalization import trace_final_analysis, validate_finalization_result
 from analysis.output_contracts import validate_draft
 from analysis.output_validator import prompt_inputs
+from evidence.archive_contracts import ArchiveError
 from evidence.contracts import EvidenceRecord, EvidenceSource, HumanConfirm
 
 from .connection import is_temporary_database, transaction
@@ -54,10 +56,14 @@ def evidence_row(record, created_at):
     aware_time(created_at)
     for value in (record.raw_response_path, record.model_version, record.supersedes_evidence_id):
         require(value is None or type(value) is str, "ID_COERCION_FORBIDDEN")
+    require(record.raw_response_path is None or not (Path(record.raw_response_path).is_absolute() or
+            PureWindowsPath(record.raw_response_path).is_absolute()), "ABSOLUTE_RAW_PATH_FORBIDDEN")
     return dict(id=record.evidence_id, analysis_report_id=None, source=record.source.value,
                 timestamp=record.request_timestamp, raw_data_path=record.raw_response_path,
-                calculation=None if record.normalization_rule is None else
-                dumps({"normalization_rule": record.normalization_rule}), model_version=record.model_version,
+                calculation=dumps({"normalization_rule": record.normalization_rule,
+                                   "validation_result": {"status": record.validation_result.status.value,
+                                                         "failures": record.validation_result.failures},
+                                   "normalized_data_hash": record.normalized_data_hash}), model_version=record.model_version,
                 human_confirm=record.human_confirm.value, collection_task_id=record.collection_task_id,
                 system_run_id=record.system_run_id, created_at=created_at,
                 supersedes_evidence_id=record.supersedes_evidence_id)
@@ -71,15 +77,30 @@ def snapshot_row(candidate, kind):
 
 
 class SQLitePersistenceRepository:
-    def __init__(self, db, *, allow_synthetic_evidence=False):
+    def __init__(self, db, *, allow_synthetic_evidence=False, archive_reader=None,
+                 enable_real_provider_evidence=False):
         require(type(allow_synthetic_evidence) is bool, "EXPLICIT_SYNTHETIC_FLAG_REQUIRED")
         require(schema_state(db) == "B", "SCHEMA_DRIFT")
         self.db = db
         self.allow_synthetic_evidence = allow_synthetic_evidence
+        require(type(enable_real_provider_evidence) is bool, "EXPLICIT_RUNTIME_FLAG_REQUIRED")
+        self.archive_reader = archive_reader
+        self.enable_real_provider_evidence = enable_real_provider_evidence
 
-    def _provider_guard(self):
-        require(self.allow_synthetic_evidence and is_temporary_database(self.db),
+    def _provider_guard(self, records, binding=None):
+        synthetic = self.allow_synthetic_evidence and is_temporary_database(self.db)
+        if synthetic and all(not (r.raw_response_path or "").startswith("archive://") for r in records):
+            return
+        require(self.enable_real_provider_evidence and self.archive_reader is not None,
                 "REAL_PROVIDER_EVIDENCE_RUNTIME_WRITE_DISABLED")
+        require(bool(records), "INPUT_EVIDENCE_MISSING")
+        try:
+            for record in records:
+                self.archive_reader.verify_record(record)
+                if binding is not None and record.evidence_id in binding["used_evidence_ids"]:
+                    self.archive_reader.binding(record.raw_response_path, binding["analysis_report_id"], binding)
+        except (ArchiveError, KeyError, TypeError, OSError):
+            require(False, "PROVIDER_ARCHIVE_NOT_VERIFIED")
 
     def _insert(self, table, row):
         require(table in NEW_TABLES, "TABLE_NOT_AUTHORIZED")
@@ -115,12 +136,13 @@ class SQLitePersistenceRepository:
                        raw_model_output=raw_model_output, evidence_created_at=evidence_created_at)
         records = tuple(evidence_records)
         if records:
-            self._provider_guard()
+            self._provider_guard(records)
         identifiers = [r.evidence_id for r in records]
         require(len(set(identifiers)) == len(identifiers) and
                 set(identifiers) <= set(run.input_evidence_ids), "EVIDENCE_BINDING_INVALID")
         return self._operation([("analysis_tasks", row)] +
-                               [("evidence_records", evidence_row(r, evidence_created_at)) for r in records])
+                               [("evidence_records", evidence_row(r, evidence_created_at)) for r in records],
+                               validate=lambda: self._provider_guard(records) if records else None)
 
     def _check_task(self, draft, run):
         validate_confirmation_input(draft, run)
@@ -220,7 +242,6 @@ class SQLitePersistenceRepository:
             require((report_id is None) == (evidence_id is None), "PREDECESSOR_BINDING_INVALID")
 
     def persist_finalization(self, flow, prepared, final, *, evidence_records, evidence_created_at):
-        self._provider_guard()  # No real finalization may bypass the deferred metadata contract.
         validate_prepared_snapshot(prepared)
         validate_finalization_result(final, flow.draft, flow.run_evidence)
         flow.validate()
@@ -239,8 +260,8 @@ class SQLitePersistenceRepository:
         require(len({r.evidence_id for r in records}) == len(records) and
                 {r.evidence_id for r in records} == set(flow.run_evidence.input_evidence_ids),
                 "INPUT_EVIDENCE_MISSING_OR_EXTRA")
-        # This is the existing in-memory domain gate over synthetic records.
-        # It does not establish persisted raw/sidecar integrity.
+        self._provider_guard(records, final.evidence.to_dict())
+        # Keep the sealed domain gate in addition to physical verification.
         trace_final_analysis(final, flow.draft, flow.run_evidence, evidence_records=records)
         report = dict(id=snapshot.analysis_report_id, task_id=snapshot.analysis_run_id,
                       **{k: dumps(v) for k, v in snapshot.seven_fields.items()},
@@ -258,6 +279,7 @@ class SQLitePersistenceRepository:
                  ("analysis_reports", report), ("analysis_final_evidence", evidence)]
 
         def validate():
+            self._provider_guard(records, final.evidence.to_dict())
             self._check_task(flow.draft, flow.run_evidence)
             self._check_progress(flow)
             self._predecessor(final)

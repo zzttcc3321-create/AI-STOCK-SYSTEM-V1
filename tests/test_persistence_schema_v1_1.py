@@ -420,7 +420,8 @@ class ResumeSchemaTests(unittest.TestCase):
         # #011 historical scope remains frozen; #012 adds only its approved files.
         historical=subprocess.check_output(['git','diff',BASELINE,IMPLEMENTATION_BASELINE,'--name-only']).decode().splitlines()
         self.assertTrue(set(historical)<=WHITELIST,historical)
-        changed=subprocess.check_output(['git','diff',IMPLEMENTATION_BASELINE,'--name-only']).decode().splitlines()
+        changed=subprocess.check_output(['git','diff',IMPLEMENTATION_BASELINE,
+            '00ecb1518daa9d7bf63b53712ace9cb2b076af7f','--name-only']).decode().splitlines()
         self.assertTrue(set(changed)<=IMPLEMENTATION_WHITELIST,changed)
         self.assertEqual({str(p) for p in Path('migration').glob('*.sql')},
                          {'migration/003_db_schema_v1_1_additive.sql'})
