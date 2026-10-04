@@ -114,12 +114,31 @@ class ConfirmationReadRepository:
                           "reason_code": "REVIEW_OVERRIDE", "required": True} for o in overrides]
             for item in required:
                 item["current_state"] = states.get((item["target"], item["reason_code"]), "PENDING")
+        tasks = rows(self.db, "SELECT validated_draft_json FROM analysis_tasks WHERE id=?",
+                     (selected[0]["analysis_run_id"],))
+        draft_context = (loads(tasks[0]["validated_draft_json"]).get("limitation_context")
+                         if tasks else None)
+        # Event rows retain their frozen schema and hashes. This explicit sidecar
+        # carries input quality independently of human CONFIRMED/REJECTED state,
+        # including before PREPARED and for override/final-report events.
+        def event_details(event):
+            details = next((item.get("details", {}) for item in required or []
+                            if (item["target"], item["reason_code"]) ==
+                            (event["target"], event["reason_code"])), {})
+            return {**details, "input_limitation_context":
+                    details.get("input_limitation_context", draft_context)}
+
         return {"status": "OK" if required is not None else "CONFIRMATION_PLAN_UNAVAILABLE",
                 "analysis_report_id": analysis_report_id, "revision": revision_id,
                 "generated_confirm_state": generated, "current_confirm_state": current,
                 "states": [{"target": target, "reason_code": reason, "current_state": state}
                            for (target, reason), state in states.items()], "events": events,
                 "overrides": overrides, "required_items": required,
+                "event_limitation_details": [
+                    {"event_id": event["event_id"], "target": event["target"],
+                     "reason_code": event["reason_code"],
+                     "details": event_details(event)}
+                    for event in events],
                 "record_origin": "V1_1_PERSISTENCE"}
 
 
@@ -416,6 +435,8 @@ class AnalysisReadRepository:
                 "stock_id": report["stock_id"], "revision": report["revision_id"],
                 "supersedes": report["supersedes_analysis_report_id"], "model_version": report["model_version"],
                 "seven_fields": fields, "hashes": hashes, "created_at": report["created_at"],
+                "confirmation_decisions": snapshot["confirmation_decisions"],
+                "watch_items": snapshot["watch_items"],
                 "generated_confirm_state": confirmation["generated_confirm_state"],
                 "current_confirm_state": confirmation["current_confirm_state"],
                 "record_origin": "V1_1_PERSISTENCE", "evidence_completeness": "PARTIAL_DB_PROJECTION",
