@@ -12,6 +12,7 @@ from .contracts import (
     ConversionRule, Freshness, FreshnessCheck, MissingData, NormalizationResult, NormalizationRule,
     NormalizedRecord, NumericField, UnitStatus,
 )
+from .semantics import metadata
 from .validation import parse_trade_date, validate_daily, validate_quote
 
 DAILY_KINDS = frozenset({"historical_daily", "daily_kline"})
@@ -138,8 +139,15 @@ class DataNormalizer:
         canonical: list[Mapping[str, Any]] = []
         seen: set[str] = set()
         for bar in bars if isinstance(bars, Sequence) and not isinstance(bars, (str, bytes)) else ():
-            record, output = self._daily_record(bar, provider, provider_timestamp, declarations,
+            semantic_declarations = {key: payload[key] for key in ("period", "field_semantics", "rule_version") if key in payload}
+            record_source = {**semantic_declarations, **bar} if isinstance(bar, Mapping) else bar
+            record, output = self._daily_record(record_source, provider, provider_timestamp, declarations,
                                                acquired_at, judgment_cutoff)
+            for step in record.values.get("conversion_chain", ()):
+                if step["field"] in semantic_declarations and isinstance(bar, Mapping) and step["field"] not in bar:
+                    step["source"] = f"{provider}.payload.{step['field']}"
+                if "input_unit" in step:
+                    step["unit_declaration_source"] = "caller.units+payload.units" if units else f"{provider}.payload.units"
             records.append(record)
             if output is not None:
                 canonical.append(output)
@@ -150,7 +158,14 @@ class DataNormalizer:
         expected = {date for value in expected_raw if (date := parse_trade_date(value))}
         stock_id = payload.get("stock_id") or next((b.get("stock_id") for b in bars if isinstance(b, Mapping) and b.get("stock_id")), "")
         missing = tuple(MissingData(str(stock_id), date) for date in sorted(expected - seen))
-        return NormalizationResult(raw, tuple(records), tuple(canonical), missing, {"execution": "SERIAL"})
+        series = []
+        for stock in sorted({row["stock_id"] for row in canonical}):
+            bases = sorted({row["adjustment_basis"] for row in canonical if row["stock_id"] == stock})
+            series.append({"stock_id": stock, "adjustment_bases": bases,
+                "comparable": len(bases) == 1 and "UNKNOWN" not in bases,
+                "reason_codes": [] if len(bases) == 1 and "UNKNOWN" not in bases else ["MIXED_OR_UNKNOWN_ADJUSTMENT_BASIS"]})
+        return NormalizationResult(raw, tuple(records), tuple(canonical), missing,
+            {"execution": "SERIAL", "price_series": series})
 
     def _daily_record(self, bar: Any, provider: Any, timestamp: Any, units: Mapping[str, str | None],
                       acquired_at=None, judgment_cutoff=None):
@@ -171,6 +186,7 @@ class DataNormalizer:
             "adjust_type": adjust_type,
             "adjust_status": "VERIFIED" if adjust_type is not None else "UNVERIFIED",
         }
+        values.update(metadata({**source, "adjust_type": adjust_type}, provider, "daily_kline", numeric))
         if acquired_at is not None or judgment_cutoff is not None:
             values["knowability"] = time_facts(period=values["trade_date"], period_basis="canonical.trade_date",
                 disclosure=disclosure_fact(source, basis="provider.row"), acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)
@@ -195,11 +211,18 @@ class DataNormalizer:
             quotes = [payload]
         records, canonical = [], []
         for quote in quotes:
-            source = quote if isinstance(quote, Mapping) else {}
+            semantic_declarations = {key: payload[key] for key in ("period", "field_semantics", "rule_version") if key in payload}
+            source = {**semantic_declarations, **quote} if isinstance(quote, Mapping) else {}
             numeric = {name: _numeric(source.get(name), declarations.get(name, declarations.get("price") if name in {"price", "bid", "ask"} else None), "股" if name == "volume" else "元") for name in ("price", "bid", "ask", "volume", "amount")}
             timestamp, freshness, check = _quote_freshness(source, envelope, acquired_at, judgment_cutoff)
             values = {"stock_id": source.get("stock_id"), "quote_timestamp": timestamp, "freshness": freshness,
                       "freshness_check": check, "provider": _get(envelope, "provider_name")}
+            values.update(metadata(source, _get(envelope, "provider_name"), "market_quotes", numeric))
+            for step in values["conversion_chain"]:
+                if step["field"] in semantic_declarations and isinstance(quote, Mapping) and step["field"] not in quote:
+                    step["source"] = f"{_get(envelope, 'provider_name')}.payload.{step['field']}"
+                if "input_unit" in step:
+                    step["unit_declaration_source"] = "caller.units+payload.units" if units else f"{_get(envelope, 'provider_name')}.payload.units"
             if acquired_at is not None or judgment_cutoff is not None:
                 values["knowability"] = time_facts(period=timestamp, period_basis="canonical.quote_timestamp",
                     disclosure=disclosure_fact(source, basis="provider.row"), acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)

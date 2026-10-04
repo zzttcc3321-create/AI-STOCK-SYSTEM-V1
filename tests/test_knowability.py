@@ -6,6 +6,7 @@ import json
 import unittest
 
 from analysis import AnalysisInputError, AnalysisPackageBuilder
+from analysis.contracts import safe_json
 from analysis.prompt_builder import PromptBuilder
 from evidence import EvidenceBuilder, sha256_digest
 from evidence.contracts import TimeFact
@@ -177,7 +178,7 @@ class KnowabilityTests(unittest.TestCase):
             self.assertEqual(retained["knowability"]["judgment_cutoff"]["value"], boundary)
             self.assertIn(evidence.evidence_id, [item["evidence_id"] for item in package.evidence_index])
             inputs = PromptBuilder().inputs(package)
-            self.assertEqual(inputs["financial_data"]["records"][0]["data"], retained)
+            self.assertEqual(safe_json(inputs["financial_data"]["records"][0]["data"]), safe_json(retained))
         _, _, equal_inputs = financial(disclosure=ACQUIRED)
         self.assertEqual(len(AnalysisPackageBuilder().build(**equal_inputs, judgment_cutoff=ACQUIRED)
                              .financial_summary["records"]), 1)

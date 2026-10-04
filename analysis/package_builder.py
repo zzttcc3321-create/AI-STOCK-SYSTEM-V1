@@ -10,6 +10,7 @@ from evidence.contracts import EvidenceRecord
 from evidence.contracts import TimeFact
 from evidence.knowability import aware_clock, cutoff_reasons, time_facts, validate_times
 from normalizer.contracts import ConversionRule, NumericField, UnitStatus
+from normalizer.semantics import RULE_VERSION, SEMANTIC_FIELDS, validate_metadata
 from normalizer.validation import parse_trade_date, validate_daily, validate_quote
 from normalizer.information import validate_information_evidence, validate_information_result
 from normalizer.information_contracts import (
@@ -132,7 +133,7 @@ def _fallback(value: Any) -> dict[str, Any] | None:
 
 def _validate_market(row: dict[str, Any], kind: str, stock_id: str) -> tuple[str, ...]:
     required = _DAILY_FIELDS if kind == "daily_kline" else _QUOTE_FIELDS
-    optional = _PERSISTENCE_FIELDS | {"knowability"} | ({"adjust_status"} if kind == "daily_kline" else {"freshness_check"})
+    optional = SEMANTIC_FIELDS | _PERSISTENCE_FIELDS | {"knowability"} | ({"adjust_status"} if kind == "daily_kline" else {"freshness_check"})
     if not required <= set(row) or set(row) - required - optional:
         raise AnalysisInputError("record does not match the existing canonical contract")
     if row["stock_id"] != stock_id:
@@ -181,6 +182,10 @@ def _validate_market(row: dict[str, Any], kind: str, stock_id: str) -> tuple[str
     ranks = {"PASS": 0, "WARNING": 1, "UNVERIFIED": 2}
     if ranks[row["data_quality_status"]] < ranks[result.status.value]:
         raise AnalysisInputError("canonical quality status hides a validation warning")
+    try:
+        validate_metadata(row, kind)
+    except ValueError as exc:
+        raise AnalysisInputError(str(exc)) from None
     return result.warnings
 
 
@@ -429,7 +434,39 @@ class AnalysisPackageBuilder:
             primary = DAILY_SOURCE if kind == "daily_kline" else QUOTE_SOURCE
             absent_status = sources[primary] if sources[primary] in {"MISSING", "NOT_AVAILABLE"} else "MISSING"
             blocks[kind] = _block(entries, reason=None if entries else "No evidenced canonical data", absent_status=absent_status)
-        if fallback is not None and not any(entry["data"]["provider"] == QUOTE_SOURCE for entry in blocks["daily_kline"]["records"]) and not any(
+        comparability = []
+        daily_entries = blocks["daily_kline"]["records"]
+        bases = sorted({entry["data"]["adjustment_basis"] for entry in daily_entries})
+        mixed = len(bases) > 1 or (len(daily_entries) > 1 and "UNKNOWN" in bases)
+        comparability.append({"scope": "daily_kline", "adjustment_bases": bases,
+            "comparable": len(bases) == 1 and not mixed and "UNKNOWN" not in bases,
+            "rule_version": RULE_VERSION,
+            "reason_codes": ["MIXED_OR_UNKNOWN_ADJUSTMENT_BASIS"] if mixed or "UNKNOWN" in bases else []})
+        if mixed:
+            for entry in daily_entries:
+                excluded_record_quality.append({"path": "daily_kline", "status": "UNVERIFIED",
+                    "reason": "mixed or unknown adjustment basis; series excluded",
+                    "reason_codes": ["MIXED_OR_UNKNOWN_ADJUSTMENT_BASIS"],
+                    "source": entry["data"]["provider"], "evidence_ids": entry["evidence_ids"]})
+            blocks["daily_kline"] = _block([], reason="Incomparable adjustment bases", absent_status="UNVERIFIED")
+            incomplete.append("daily_kline: incomparable adjustment bases; series excluded")
+            warnings.add("daily_kline: MIXED_OR_UNKNOWN_ADJUSTMENT_BASIS")
+        quote_entries = blocks["market_quotes"]["records"]
+        if daily_entries and quote_entries:
+            cross_ok = not mixed and bases == ["UNADJUSTED"]
+            comparability.append({"scope": "daily_kline_vs_market_quotes", "adjustment_bases": bases + ["UNADJUSTED"],
+                "comparable": cross_ok, "rule_version": RULE_VERSION, "reason_codes": [] if cross_ok else ["CROSS_SERIES_ADJUSTMENT_MISMATCH"]})
+            if not cross_ok:
+                # Exclude the snapshot so downstream facts cannot silently compare
+                # adjusted historical levels against unadjusted live prices.
+                blocks["market_quotes"] = _block([], reason="Cross-series adjustment mismatch", absent_status="UNVERIFIED")
+                excluded_record_quality.append({"path": "market_quotes", "status": "UNVERIFIED",
+                    "reason": "cross-series adjustment mismatch; snapshot excluded",
+                    "evidence_ids": quote_entries[0]["evidence_ids"]})
+                incomplete.append("market_quotes: cross-series adjustment mismatch; snapshot excluded")
+                warnings.add("market_quotes: CROSS_SERIES_ADJUSTMENT_MISMATCH")
+                missing.add("market_quotes")
+        if fallback is not None and not any(entry["data"]["provider"] == QUOTE_SOURCE for entry in daily_entries) and not any(
                 item["path"].startswith("daily_kline.") and item["source"] == QUOTE_SOURCE for item in restrictions):
             raise AnalysisInputError("fallback_used must describe retained official daily data")
         availability = _mapping(information_availability if information_availability is not None else {}, "information_availability")
@@ -520,6 +557,7 @@ class AnalysisPackageBuilder:
             "complete_analysis_input": not incomplete and not any(field in missing for field in INFORMATION_FIELDS),
             "incomplete_reasons": sorted(set(incomplete)),
             "excluded_record_quality": excluded_record_quality,
+            "price_comparability": comparability,
         }
         if judgment_cutoff is not None:
             quality["data_period_calendar"] = "UTC+08:00; canonical trade/report calendar dates"

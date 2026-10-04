@@ -20,6 +20,7 @@ from evidence.knowability import disclosure_fact, time_facts, aware_clock
 from providers.contract import ProviderEnvelope, ProviderStatus
 from providers.tdx_information import TdxInformationProvider, _json
 
+from .semantics import RULE_VERSION
 from .contracts import DataQualityStatus, NormalizedRecord, ValidationResult
 from .information_contracts import (
     FINANCIAL_METRICS, SOURCE, STATEMENT_ENTRIES, TOOL_CATEGORIES, TOOL_KINDS,
@@ -204,6 +205,9 @@ def validate_information_result(result: Any) -> None:
     if (type(result) is not InformationNormalizationResult or result._gate_digest is None
             or result._gate_digest != _digest(result)):
         _reject("canonical information requires an unchanged InformationNormalizer gate result")
+    for row in result.canonical_data:
+        if row.get("rule_version") != RULE_VERSION:
+            _reject("unsupported information rule version; canonical data must not be reinterpreted")
 
 
 def validate_information_evidence(result: InformationNormalizationResult, evidence: Any) -> None:
@@ -316,8 +320,15 @@ class InformationNormalizer:
         if (bool(records) and envelope.status != ProviderStatus.AVAILABLE
                 or not records and envelope.status != ProviderStatus.NOT_AVAILABLE):
             _reject("information availability contradicts response records")
-        canonical = freeze_information(records)
         rules = _normalization_rules(tool, view)
+        for row in records:
+            row.update(period="REPORTING_PERIOD_UNVERIFIED" if view else "EVENT_PERIOD_UNVERIFIED",
+                field_semantics={key: "UNVERIFIED" if value is None else "AUDITED_" + key.upper()
+                    for key, value in row.items() if key != "knowability"},
+                conversion_source=evidence.evidence_id, rule_version=RULE_VERSION,
+                conversion_chain=[{"field": rule.field, "rule": rule.rule.value,
+                    "source": evidence.evidence_id, "rule_version": RULE_VERSION} for rule in rules])
+        canonical = freeze_information(records)
         normalized = tuple(NormalizedRecord(row, freeze_information({}), rules,
                             ValidationResult(True, DataQualityStatus.UNVERIFIED,
                                              warnings=("Nullable semantics remain UNVERIFIED",)))
