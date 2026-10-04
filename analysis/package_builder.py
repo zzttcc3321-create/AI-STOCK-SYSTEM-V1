@@ -244,6 +244,7 @@ class AnalysisPackageBuilder:
         warnings = _text_set(validation_warnings, "validation_warnings")
         incomplete = []
         restrictions = []
+        excluded_record_quality = []
         # A cutoff sealed by normalization cannot silently disappear downstream.
         # All supplied contexts must agree; no choice between source cutoffs.
         embedded = []
@@ -335,6 +336,7 @@ class AnalysisPackageBuilder:
 
         def attach(row: dict[str, Any], path: str, source: str | None = None,
                    *, information_result: Any = None) -> dict[str, Any] | None:
+            record_status = row.get("data_quality_status")
             addressed.add(path)
             identifiers = _sequence(links.get(path, []), "evidence links")
             for identifier in identifiers:
@@ -346,6 +348,9 @@ class AnalysisPackageBuilder:
             if source is not None and any(item["source"] != source for item in matched):
                 raise AnalysisInputError("evidence source does not match canonical source")
             if not identifiers or len(matched) != len(identifiers) or any(item["validation_result"]["status"] != "PASS" for item in matched):
+                if record_status in QUALITY_STATUSES:
+                    excluded_record_quality.append({"path": path, "status": record_status,
+                        "reason": "evidence missing or not validated; data excluded"})
                 missing.add(f"{path}.evidence")
                 incomplete.append(f"{path}: evidence missing or not validated; data excluded")
                 return None
@@ -503,6 +508,7 @@ class AnalysisPackageBuilder:
         quality_statuses.update(block["status"] for block in blocks.values())
         quality_statuses.update(block["status"] for block in information.values())
         quality_statuses.update(item["status"] for item in restrictions)
+        quality_statuses.update(item["status"] for item in excluded_record_quality)
         quality = {
             "aggregation_rule": "UNVERIFIED > WARNING > PASS; WARNINGS_IMPLY_WARNING; AVAILABILITY_RETAINED_SEPARATELY",
             "source_status": sources, "DATA_AVAILABILITY_REPORT": sources,
@@ -513,6 +519,7 @@ class AnalysisPackageBuilder:
             "package_status": "INCOMPLETE" if incomplete else "COMPLETE",
             "complete_analysis_input": not incomplete and not any(field in missing for field in INFORMATION_FIELDS),
             "incomplete_reasons": sorted(set(incomplete)),
+            "excluded_record_quality": excluded_record_quality,
         }
         if judgment_cutoff is not None:
             quality["data_period_calendar"] = "UTC+08:00; canonical trade/report calendar dates"

@@ -445,6 +445,29 @@ class AnalysisPackageTests(unittest.TestCase):
         self.assertIn("daily_kline.1.evidence", package.data_quality["missing_fields"])
         self.assertEqual(package.data_quality["package_status"], "INCOMPLETE")
 
+    def test_missing_evidence_preserves_excluded_unverified_record_quality(self):
+        for retain_valid_daily in (False, True):
+            with self.subTest(retain_valid_daily=retain_valid_daily):
+                arguments = package_arguments()
+                arguments["canonical_data"]["daily_kline"][0].update(
+                    adjust_type=None, adjust_status="UNVERIFIED",
+                    data_quality_status="UNVERIFIED")
+                del arguments["evidence_links"]["daily_kline.0"]
+                if retain_valid_daily:
+                    arguments["canonical_data"]["daily_kline"].append(
+                        canonical_daily(trade_date="2026-09-29"))
+                    arguments["evidence_links"]["daily_kline.1"] = ["EV-DAILY"]
+                package = self.build(arguments)
+                self.assertEqual(package.data_quality["source_status"]["TUSHARE_MCP"], "PASS")
+                self.assertEqual(package.data_quality["data_quality_status"], "UNVERIFIED")
+                self.assertEqual(len(package.daily_kline_summary["records"]), int(retain_valid_daily))
+                self.assertTrue(all(entry["data"]["data_quality_status"] == "PASS"
+                                    for entry in package.daily_kline_summary["records"]))
+                self.assertEqual(package.data_quality["excluded_record_quality"][0]["path"], "daily_kline.0")
+                self.assertEqual(package.data_quality["excluded_record_quality"][0]["status"], "UNVERIFIED")
+                self.assertEqual(package.data_quality["excluded_record_quality"][0]["reason"],
+                                 "evidence missing or not validated; data excluded")
+
     def test_missing_all_evidence_removes_business_facts(self):
         arguments = package_arguments()
         arguments["evidence_metadata"] = []
