@@ -25,8 +25,15 @@ _ALLOWED = {
 
 def _plan(draft) -> tuple[ConfirmationItem, ...]:
     # Every field gets an explicit human result, in addition to frozen P3 reasons.
-    items = [ConfirmationItem(name, "REVIEW_FIELD") for name in ANALYSIS_FIELDS]
+    items = [ConfirmationItem(name, "REVIEW_FIELD", {
+        "data_quality_status": draft.output[name]["data_quality_status"],
+        "limitations": draft.output[name]["content"]["limitations"],
+        "input_limitation_context": draft.limitation_context,
+    }) for name in ANALYSIS_FIELDS]
     for item in draft.human_confirmation_items:
+        item = dict(item)
+        if item["reason"] == "REVIEW_DATA_QUALITY":
+            item["input_limitation_context"] = draft.limitation_context
         items.append(ConfirmationItem(item["target"], item["reason"],
                                       {key: value for key, value in item.items()
                                        if key not in ("target", "reason")}))

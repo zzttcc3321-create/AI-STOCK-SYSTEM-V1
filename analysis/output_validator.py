@@ -279,6 +279,13 @@ class SevenFieldValidator:
         self._review(parsed["human_confirmation_items"], review_targets, context)
         draft = ValidatedAnalysisDraft(
             output=output, human_confirmation_items=tuple(parsed["human_confirmation_items"]),
+            limitation_context={
+                "aggregation_rule": "FIELD_STATUS_MAY_SUMMARIZE_AVAILABILITY; INPUT_LIMITATIONS_RETAINED_SEPARATELY",
+                "data_quality_report": context.inputs["data_quality_report"],
+                "limitations": [{"input_path": path, "status": context.status(path),
+                                 "reason": context.limitation_reason(path)}
+                                for path in sorted(review_targets)],
+            },
             input_hash=envelope.input_hash, template_hash=envelope.template_hash,
             model_output_hash=hashlib.sha256(raw_response.encode("utf-8")).hexdigest(),
             validated_output_hash=digest(output), input_evidence_ids=envelope.evidence_ids,

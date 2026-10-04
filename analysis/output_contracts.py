@@ -159,6 +159,7 @@ class ValidatedAnalysisDraft:
     validated_output_hash: str
     input_evidence_ids: tuple[str, ...]
     used_evidence_ids: tuple[str, ...]
+    limitation_context: Mapping[str, Any] = field(default_factory=dict)
     output_schema_version: str = OUTPUT_SCHEMA_VERSION
     analysis_status: str = field(default="UNCONFIRMED", init=False)
     human_confirm: str = field(default="PENDING", init=False)
@@ -166,6 +167,7 @@ class ValidatedAnalysisDraft:
     _gate_digest: str | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "limitation_context", freeze(safe_json(self.limitation_context)))
         object.__setattr__(self, "output", freeze(safe_json(self.output)))
         object.__setattr__(self, "human_confirmation_items", freeze(safe_json(self.human_confirmation_items)))
         object.__setattr__(self, "input_evidence_ids", tuple(self.input_evidence_ids))

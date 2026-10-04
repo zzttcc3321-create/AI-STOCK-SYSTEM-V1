@@ -174,6 +174,7 @@ def _review_content(flow: ConfirmationFlow) -> dict:
             "HUMAN_OVERRIDE": None if override is None else override.to_dict(),
             "ORIGIN": "HUMAN" if override and decision == "MODIFIED" else "AI",
             "decision_reasons": related,
+            "input_limitation_context": flow.draft.limitation_context,
         }
     watch = [item for item in decisions if item["reason_code"] == "REVIEW_DATA_QUALITY"
              or item["state"] == "REJECTED"]

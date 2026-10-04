@@ -188,7 +188,8 @@ def _block(records: list[dict[str, Any]], *, reason: str | None = None,
            absent_status: str = "MISSING") -> dict[str, Any]:
     statuses = {entry["data"].get("data_quality_status", "PASS") for entry in records}
     status = "UNVERIFIED" if "UNVERIFIED" in statuses else "WARNING" if "WARNING" in statuses else "PASS"
-    return {"status": status if records else absent_status, "records": records, "reason": reason}
+    return {"status": status if records else absent_status, "records": records, "reason": reason,
+            "aggregation_rule": "WORST_RECORD_QUALITY: UNVERIFIED > WARNING > PASS; EMPTY_USES_ABSENT_STATUS"}
 
 
 class AnalysisPackageBuilder:
@@ -497,12 +498,18 @@ class AnalysisPackageBuilder:
         for source, status in sources.items():
             if status in {"WARNING", "UNVERIFIED"}:
                 warnings.add(f"{source}: {status}")
+        # Aggregate typed statuses; prose warnings are reasons, not a status parser.
+        quality_statuses = set(sources.values())
+        quality_statuses.update(block["status"] for block in blocks.values())
+        quality_statuses.update(block["status"] for block in information.values())
+        quality_statuses.update(item["status"] for item in restrictions)
         quality = {
+            "aggregation_rule": "UNVERIFIED > WARNING > PASS; WARNINGS_IMPLY_WARNING; AVAILABILITY_RETAINED_SEPARATELY",
             "source_status": sources, "DATA_AVAILABILITY_REPORT": sources,
             "missing_fields": sorted(missing), "stale_fields": sorted(stale),
             "fallback_used": fallback, "validation_warnings": sorted(warnings),
             "REALTIME_QUOTE_STATUS": realtime,
-            "data_quality_status": "UNVERIFIED" if any("UNVERIFIED" in warning for warning in warnings) else "WARNING" if warnings else "PASS",
+            "data_quality_status": "UNVERIFIED" if "UNVERIFIED" in quality_statuses else "WARNING" if warnings or "WARNING" in quality_statuses else "PASS",
             "package_status": "INCOMPLETE" if incomplete else "COMPLETE",
             "complete_analysis_input": not incomplete and not any(field in missing for field in INFORMATION_FIELDS),
             "incomplete_reasons": sorted(set(incomplete)),
