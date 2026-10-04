@@ -99,6 +99,8 @@ def validate_quote(values: Mapping[str, Any], fields: Mapping[str, NumericField]
             failures.append(f"{name} unit is unverified")
     if values.get("quote_timestamp") is None:
         warnings.append("quote_timestamp is missing; freshness is UNKNOWN")
+    for reason in values.get("freshness_check", {}).get("reason_codes", ()):
+        warnings.append("quote freshness restriction: " + reason)
     if failures:
         return ValidationResult(False, DataQualityStatus.FAILED, tuple(failures), tuple(warnings))
     return ValidationResult(
