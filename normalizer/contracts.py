@@ -10,6 +10,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping
 
+# Shared four-clock sidecar contract; canonical JSON participates in Evidence
+# normalized_data_hash without adding table columns or changing raw metadata.
+from evidence.contracts import KnowabilityTimes, TimeFact
+
 
 class DataQualityStatus(str, Enum):
     PASS = "PASS"
@@ -85,4 +89,3 @@ class NormalizationResult:
     canonical_data: tuple[Mapping[str, Any], ...]
     missing_data: tuple[MissingData, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
-

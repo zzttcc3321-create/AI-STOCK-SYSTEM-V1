@@ -72,8 +72,9 @@ def gate_information(tool="wenda_news_query", *, view=None, data=None, wire="jso
 class InformationNormalizerTests(unittest.TestCase):
     def test_final_evidence_carries_exact_information_rule_ids(self):
         summary = "source_supplied_summary:INFO_SOURCE_SUMMARY_EXACT_COPY"
-        information = {summary, "title:INFO_TITLE_EXACT_COPY"}
+        information = {summary, "title:INFO_TITLE_EXACT_COPY", "knowability:KNOWABILITY_FOUR_CLOCKS"}
         financial = {summary, "report_date:FIN_REPORT_DATE_EXACT_ISO_DATE",
+                     "publish_time:FIN_DISCLOSURE_TIME_EXPLICIT_FIELD", "knowability:KNOWABILITY_FOUR_CLOCKS",
                      "statement_view:FIN_STATEMENT_VIEW_EXACT_ENTRY",
                      *(f"{metric}:FIN_METRIC_UNIT_UNVERIFIED_NULL" for metric in FINANCIAL_METRICS)}
         samples = [(tool, None) for tool in ("wenda_notice_query", "wenda_news_query", "wenda_report_query")]
