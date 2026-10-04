@@ -222,7 +222,7 @@ class PromptBuilderTests(unittest.TestCase):
     def test_unverified_and_warning_explicit_in_prompt(self):
         arguments = package_arguments()
         row = arguments["canonical_data"]["daily_kline"][0]
-        row.update(adjust_type=None, adjust_status="UNVERIFIED", data_quality_status="UNVERIFIED")
+        row.update(adjust_type=None, adjustment_basis="UNKNOWN", adjust_status="UNVERIFIED", data_quality_status="UNVERIFIED")
         arguments["source_status"]["TUSHARE_MCP"] = "WARNING"
         envelope = self.builder.build(AnalysisPackageBuilder().build(**arguments))
         self.assertIn('"data_quality_status":"UNVERIFIED"', envelope.user_prompt)

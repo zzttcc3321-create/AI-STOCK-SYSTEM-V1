@@ -75,6 +75,14 @@ def _rules(result: Any) -> tuple[str, ...] | None:
             rule = _get(item, "rule")
             rule_value = rule.value if isinstance(rule, Enum) else rule
             rules.append(f"{_get(item, 'field')}:{rule_value or 'UNVERIFIED'}")
+    for row in _get(result, "canonical_data", ()):
+        if "rule_version" in row:
+            keys = ("period", "field_semantics", "conversion_source", "rule_version", "conversion_chain", "adjustment_basis")
+            rules.append("CANONICAL_SEMANTICS:" + json.dumps(_jsonable({key: row[key] for key in keys if key in row}),
+                ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    series = _get(result, "metadata", {}).get("price_series")
+    if series is not None:
+        rules.append("CANONICAL_SEMANTICS:" + json.dumps({"price_series": series}, sort_keys=True, separators=(",", ":")))
     return tuple(rules) or None
 
 

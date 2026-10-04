@@ -90,11 +90,12 @@ class InformationNormalizerTests(unittest.TestCase):
                     if tool == "wenda_report_query":
                         expected.add("institution:INFO_INSTITUTION_UNVERIFIED_NULL")
                 self.assertIsNotNone(evidence.normalization_rule)
-                self.assertEqual(set(evidence.normalization_rule), expected)
+                self.assertEqual({rule for rule in evidence.normalization_rule if not rule.startswith("CANONICAL_SEMANTICS:")}, expected)
+                self.assertTrue(any(rule.startswith("CANONICAL_SEMANTICS:") for rule in evidence.normalization_rule))
                 self.assertIsNotNone(evidence.normalized_data_hash)
                 self.assertEqual(evidence.normalized_data_hash, sha256_digest(result.canonical_data))
                 self.assertEqual(evidence.validation_result.status, ValidationStatus.PASS)
-                observed_ids.update(rule.split(":", 1)[1] for rule in evidence.normalization_rule)
+                observed_ids.update(rule.split(":", 1)[1] for rule in evidence.normalization_rule if not rule.startswith("CANONICAL_SEMANTICS:"))
         self.assertEqual(observed_ids, {rule.value for rule in InformationRuleId})
 
     def test_normalized_data_forced_mutation_breaks_gate(self):

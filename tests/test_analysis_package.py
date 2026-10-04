@@ -5,7 +5,9 @@ from dataclasses import FrozenInstanceError, replace
 import unittest
 
 from analysis import AnalysisInputError, AnalysisPackageBuilder
+from analysis.contracts import safe_json
 from normalizer import DataNormalizer
+from normalizer.semantics import metadata as semantics_metadata
 from providers import ProviderEnvelope, ProviderStatus
 from evidence import EvidenceBuilder
 from evidence import EvidenceSource, EvidenceValidationResult, ValidationStatus
@@ -32,6 +34,7 @@ def canonical_daily(**changes):
              "provider": "TUSHARE_MCP", "provider_timestamp": None,
              "data_quality_status": "PASS"}
     value.update(changes)
+    value.update(semantics_metadata(value, value["provider"], "daily_kline"))
     return value
 
 
@@ -41,6 +44,7 @@ def canonical_quote(**changes):
              "freshness": "REALTIME", "provider": "TDX_OFFICIAL_LOCAL_HTTP",
              "data_quality_status": "PASS"}
     value.update(changes)
+    value.update(semantics_metadata(value, value["provider"], "market_quotes"))
     return value
 
 
@@ -450,7 +454,7 @@ class AnalysisPackageTests(unittest.TestCase):
             with self.subTest(retain_valid_daily=retain_valid_daily):
                 arguments = package_arguments()
                 arguments["canonical_data"]["daily_kline"][0].update(
-                    adjust_type=None, adjust_status="UNVERIFIED",
+                    adjust_type=None, adjustment_basis="UNKNOWN", adjust_status="UNVERIFIED",
                     data_quality_status="UNVERIFIED")
                 del arguments["evidence_links"]["daily_kline.0"]
                 if retain_valid_daily:
@@ -540,6 +544,8 @@ class AnalysisPackageTests(unittest.TestCase):
     def test_explicit_validated_official_fallback(self):
         arguments = package_arguments()
         arguments["canonical_data"]["daily_kline"][0]["provider"] = "TDX_OFFICIAL_LOCAL_HTTP"
+        row = arguments["canonical_data"]["daily_kline"][0]
+        row.update(semantics_metadata(row, row["provider"], "daily_kline"))
         arguments["source_status"].update(TUSHARE_MCP="MISSING", TDX_OFFICIAL_LOCAL_HTTP="PASS")
         arguments["evidence_metadata"][0]["source"] = "TDX_OFFICIAL_LOCAL_HTTP"
         arguments["fallback_used"] = {"from_source": "TUSHARE_MCP", "to_source": "TDX_OFFICIAL_LOCAL_HTTP",
@@ -561,7 +567,7 @@ class AnalysisPackageTests(unittest.TestCase):
 
     def test_unverified_adjustment_and_warning_remain_explicit(self):
         arguments = package_arguments()
-        arguments["canonical_data"]["daily_kline"][0].update(adjust_type=None, adjust_status="UNVERIFIED",
+        arguments["canonical_data"]["daily_kline"][0].update(adjust_type=None, adjustment_basis="UNKNOWN", adjust_status="UNVERIFIED",
                                                               data_quality_status="UNVERIFIED")
         package = self.build(arguments)
         self.assertEqual(package.daily_kline_summary["status"], "UNVERIFIED")
@@ -634,7 +640,7 @@ class AnalysisPackageTests(unittest.TestCase):
         arguments["source_status"] = dict(reversed(list(arguments["source_status"].items())))
         self.assertEqual(first.to_json(), self.build(arguments).to_json())
         self.assertEqual(second.to_dict()["daily_kline_summary"]["records"][0]["data"],
-                         original["canonical_data"]["daily_kline"][0])
+                         safe_json(original["canonical_data"]["daily_kline"][0]))
         self.assertEqual(original["evidence_metadata"][0]["human_confirm"], "PENDING")
 
     def test_recursive_immutability_and_detached_serialization(self):
