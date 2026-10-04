@@ -7,6 +7,8 @@ from hashlib import sha256
 from typing import Any, Mapping, Sequence
 
 from evidence.contracts import EvidenceRecord
+from evidence.contracts import TimeFact
+from evidence.knowability import aware_clock, cutoff_reasons, time_facts, validate_times
 from normalizer.contracts import ConversionRule, NumericField, UnitStatus
 from normalizer.validation import parse_trade_date, validate_daily, validate_quote
 from normalizer.information import validate_information_evidence, validate_information_result
@@ -127,7 +129,7 @@ def _fallback(value: Any) -> dict[str, Any] | None:
 
 def _validate_market(row: dict[str, Any], kind: str, stock_id: str) -> tuple[str, ...]:
     required = _DAILY_FIELDS if kind == "daily_kline" else _QUOTE_FIELDS
-    optional = _PERSISTENCE_FIELDS | ({"adjust_status"} if kind == "daily_kline" else set())
+    optional = _PERSISTENCE_FIELDS | {"knowability"} | ({"adjust_status"} if kind == "daily_kline" else set())
     if not required <= set(row) or set(row) - required - optional:
         raise AnalysisInputError("record does not match the existing canonical contract")
     if row["stock_id"] != stock_id:
@@ -207,6 +209,7 @@ class AnalysisPackageBuilder:
         information_availability: Mapping[str, Any] | None = None,
         missing_fields: Sequence[str] = (), stale_fields: Sequence[str] = (),
         validation_warnings: Sequence[str] = (), fallback_used: Mapping[str, Any] | None = None,
+        judgment_cutoff: str | None = None,
     ) -> AnalysisPackage:
         identity = _mapping(stock_identity, "stock_identity")
         if set(identity) - {"stock_id", "symbol", "market", "name", "industry"}:
@@ -236,6 +239,77 @@ class AnalysisPackageBuilder:
         stale = _text_set(stale_fields, "stale_fields")
         warnings = _text_set(validation_warnings, "validation_warnings")
         incomplete = []
+        restrictions = []
+        # A cutoff sealed by normalization cannot silently disappear downstream.
+        # All supplied contexts must agree; no choice between source cutoffs.
+        embedded = []
+        context_cutoffs = []
+        if not isinstance(canonical_information, (tuple, list)):
+            raise AnalysisInputError("canonical_information must be a sequence of gate batches")
+        for result in canonical_information:
+            try:
+                validate_information_result(result)
+            except InformationNormalizationError as exc:
+                raise AnalysisInputError(str(exc)) from None
+            embedded.extend(row.get("knowability") for row in result.canonical_data)
+            if result.provenance.get("judgment_cutoff") is not None:
+                context_cutoffs.append(result.provenance["judgment_cutoff"])
+        for rows in market.values():
+            embedded.extend(row.get("knowability") for row in _sequence(rows, "canonical records")
+                            if isinstance(row, Mapping))
+        cutoffs = context_cutoffs
+        try:
+            if judgment_cutoff is not None:
+                aware_clock(judgment_cutoff)
+                cutoffs.append(judgment_cutoff)
+            for times in embedded:
+                if times is not None:
+                    validate_times(times)
+                    fact = times["judgment_cutoff"]
+                    if fact["value"] is not None:
+                        if fact["status"] != "VERIFIED":
+                            raise ValueError("unverified judgment cutoff")
+                        cutoffs.append(fact["value"])
+            if cutoffs and any(aware_clock(value) != aware_clock(cutoffs[0]) for value in cutoffs):
+                raise ValueError("conflicting judgment cutoffs")
+        except (ValueError, TypeError) as exc:
+            raise AnalysisInputError(str(exc)) from None
+        judgment_cutoff = cutoffs[0] if cutoffs else None
+
+        def historical_gate(row, path, identifiers, matched):
+            if judgment_cutoff is None:
+                return None
+            times = row.get("knowability") or time_facts(
+                period=row.get("report_date", row.get("trade_date", row.get("quote_timestamp"))),
+                period_basis="canonical.data_period", disclosure=TimeFact(None, "canonical.disclosure_missing"),
+                acquired_at=None, judgment_cutoff=judgment_cutoff)
+            times = safe_json(times)
+            times["judgment_cutoff"] = {"value": judgment_cutoff,
+                "source_basis": "caller.judgment_cutoff", "status": "VERIFIED"}
+            try:
+                reasons = list(cutoff_reasons(times, judgment_cutoff))
+                period = row.get("report_date", row.get("trade_date", row.get("quote_timestamp")))
+                if period is not None and times["data_period"]["value"] != period:
+                    reasons.append("SOURCE_TIME_CONFLICT")
+                acquired = times["acquired_at"]
+                if acquired["status"] == "VERIFIED" and any(
+                        aware_clock(item["request_timestamp"]) > aware_clock(acquired["value"])
+                        for item in matched):
+                    reasons.append("SOURCE_TIME_CONFLICT")
+            except (ValueError, TypeError) as exc:
+                raise AnalysisInputError(str(exc)) from None
+            if reasons:
+                restriction = {"path": path, "status": "UNVERIFIED",
+                    "source": row.get("provider", row.get("source")),
+                    "usable_at_cutoff": False, "reason_codes": sorted(set(reasons)),
+                    "knowability": times, "evidence_ids": identifiers}
+                restrictions.append(restriction)
+                missing.add(f"{path}.knowability")
+                incomplete.append(f"{path}: UNVERIFIED historical knowability; data excluded")
+                warnings.add(f"{path}: UNVERIFIED historical knowability")
+                return restriction
+            row["knowability"] = times
+            return None
 
         def attach(row: dict[str, Any], path: str, source: str | None = None,
                    *, information_result: Any = None) -> dict[str, Any] | None:
@@ -260,6 +334,8 @@ class AnalysisPackageBuilder:
                         validate_information_evidence(information_result, typed.get(identifier))
                     except InformationNormalizationError as exc:
                         raise AnalysisInputError(str(exc)) from None
+            if historical_gate(row, path, identifiers, matched) is not None:
+                return None
             used.update(identifiers)
             return {"data": row, "evidence_ids": identifiers}
 
@@ -283,6 +359,10 @@ class AnalysisPackageBuilder:
             # Business input provenance is distinct from the three external
             # Evidence sources; never use Provider Evidence for quantity/cost.
             holding_block = _block([{"data": holding, "input_source": "portfolio_positions"}])
+            if judgment_cutoff is not None and aware_clock(holding["snapshot_time"]) > aware_clock(judgment_cutoff):
+                holding_block = _block([], reason="Snapshot after judgment cutoff", absent_status="UNVERIFIED")
+                missing.add("holding_snapshot")
+                incomplete.append("holding_snapshot: snapshot after judgment cutoff; data excluded")
 
         blocks = {}
         for kind in ("daily_kline", "market_quotes"):
@@ -317,7 +397,8 @@ class AnalysisPackageBuilder:
             primary = DAILY_SOURCE if kind == "daily_kline" else QUOTE_SOURCE
             absent_status = sources[primary] if sources[primary] in {"MISSING", "NOT_AVAILABLE"} else "MISSING"
             blocks[kind] = _block(entries, reason=None if entries else "No evidenced canonical data", absent_status=absent_status)
-        if fallback is not None and not any(entry["data"]["provider"] == QUOTE_SOURCE for entry in blocks["daily_kline"]["records"]):
+        if fallback is not None and not any(entry["data"]["provider"] == QUOTE_SOURCE for entry in blocks["daily_kline"]["records"]) and not any(
+                item["path"].startswith("daily_kline.") and item["source"] == QUOTE_SOURCE for item in restrictions):
             raise AnalysisInputError("fallback_used must describe retained official daily data")
         availability = _mapping(information_availability if information_availability is not None else {}, "information_availability")
         if set(availability) - set(INFORMATION_FIELDS):
@@ -400,6 +481,10 @@ class AnalysisPackageBuilder:
             "complete_analysis_input": not incomplete and not any(field in missing for field in INFORMATION_FIELDS),
             "incomplete_reasons": sorted(set(incomplete)),
         }
+        if judgment_cutoff is not None:
+            quality["judgment_cutoff"] = {"value": judgment_cutoff,
+                "source_basis": "caller.judgment_cutoff", "status": "VERIFIED"}
+            quality["knowability_restrictions"] = restrictions
         # Missing information keeps the full seven-input package incomplete,
         # while evidenced historical analysis remains usable.
         if not quality["complete_analysis_input"]:

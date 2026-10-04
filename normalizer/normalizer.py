@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from typing import Any, Mapping, Sequence
+from evidence.knowability import disclosure_fact, time_facts
 
 from .contracts import (
     ConversionRule, Freshness, MissingData, NormalizationResult, NormalizationRule,
@@ -52,15 +53,17 @@ class DataNormalizer:
             raise ValueError("price_change_warning_threshold must not be negative")
         self.warning_threshold = price_change_warning_threshold
 
-    def normalize(self, envelope: Any, *, units: Mapping[str, str | None] | None = None) -> NormalizationResult:
+    def normalize(self, envelope: Any, *, units: Mapping[str, str | None] | None = None,
+                  acquired_at: str | None = None, judgment_cutoff: str | None = None) -> NormalizationResult:
         kind = _get(envelope, "data_kind")
         if kind in DAILY_KINDS:
-            return self.normalize_daily(envelope, units=units)
+            return self.normalize_daily(envelope, units=units, acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)
         if kind in QUOTE_KINDS:
-            return self.normalize_market_quotes(envelope, units=units)
+            return self.normalize_market_quotes(envelope, units=units, acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)
         raise ValueError(f"unsupported data_kind: {kind!r}")
 
-    def normalize_daily(self, envelope: Any, *, units: Mapping[str, str | None] | None = None) -> NormalizationResult:
+    def normalize_daily(self, envelope: Any, *, units: Mapping[str, str | None] | None = None,
+                        acquired_at: str | None = None, judgment_cutoff: str | None = None) -> NormalizationResult:
         raw = deepcopy(envelope)
         payload = _get(envelope, "payload") or {}
         bars = payload.get("bars", []) if isinstance(payload, Mapping) else []
@@ -72,7 +75,8 @@ class DataNormalizer:
         canonical: list[Mapping[str, Any]] = []
         seen: set[str] = set()
         for bar in bars if isinstance(bars, Sequence) and not isinstance(bars, (str, bytes)) else ():
-            record, output = self._daily_record(bar, provider, provider_timestamp, declarations)
+            record, output = self._daily_record(bar, provider, provider_timestamp, declarations,
+                                               acquired_at, judgment_cutoff)
             records.append(record)
             if output is not None:
                 canonical.append(output)
@@ -85,7 +89,8 @@ class DataNormalizer:
         missing = tuple(MissingData(str(stock_id), date) for date in sorted(expected - seen))
         return NormalizationResult(raw, tuple(records), tuple(canonical), missing, {"execution": "SERIAL"})
 
-    def _daily_record(self, bar: Any, provider: Any, timestamp: Any, units: Mapping[str, str | None]):
+    def _daily_record(self, bar: Any, provider: Any, timestamp: Any, units: Mapping[str, str | None],
+                      acquired_at=None, judgment_cutoff=None):
         source = bar if isinstance(bar, Mapping) else {}
         numeric: dict[str, NumericField] = {}
         for name in PRICE_FIELDS:
@@ -103,6 +108,9 @@ class DataNormalizer:
             "adjust_type": adjust_type,
             "adjust_status": "VERIFIED" if adjust_type is not None else "UNVERIFIED",
         }
+        if acquired_at is not None or judgment_cutoff is not None:
+            values["knowability"] = time_facts(period=values["trade_date"], period_basis="canonical.trade_date",
+                disclosure=disclosure_fact(source, basis="provider.row"), acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)
         result = validate_daily(values, numeric, warning_threshold=self.warning_threshold)
         rules = tuple(NormalizationRule(name, item.conversion_rule, item) for name, item in numeric.items())
         normalized = NormalizedRecord(values, numeric, rules, result)
@@ -113,7 +121,8 @@ class DataNormalizer:
         output["data_quality_status"] = result.status.value
         return normalized, output
 
-    def normalize_market_quotes(self, envelope: Any, *, units: Mapping[str, str | None] | None = None) -> NormalizationResult:
+    def normalize_market_quotes(self, envelope: Any, *, units: Mapping[str, str | None] | None = None,
+                                acquired_at: str | None = None, judgment_cutoff: str | None = None) -> NormalizationResult:
         raw = deepcopy(envelope)
         payload = _get(envelope, "payload") or {}
         declarations = dict(payload.get("units", {})) if isinstance(payload, Mapping) else {}
@@ -130,6 +139,9 @@ class DataNormalizer:
             if freshness not in {item.value for item in Freshness}:
                 freshness = Freshness.UNKNOWN.value
             values = {"stock_id": source.get("stock_id"), "quote_timestamp": timestamp, "freshness": freshness, "provider": _get(envelope, "provider_name")}
+            if acquired_at is not None or judgment_cutoff is not None:
+                values["knowability"] = time_facts(period=timestamp, period_basis="canonical.quote_timestamp",
+                    disclosure=disclosure_fact(source, basis="provider.row"), acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)
             validation = validate_quote(values, numeric)
             rules = tuple(NormalizationRule(name, item.conversion_rule, item) for name, item in numeric.items())
             records.append(NormalizedRecord(values, numeric, rules, validation))
@@ -142,4 +154,3 @@ class DataNormalizer:
 
 
 Normalizer = DataNormalizer
-

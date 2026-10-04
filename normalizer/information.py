@@ -15,6 +15,8 @@ from typing import Any, Mapping
 
 from evidence.builder import sha256_digest
 from evidence.contracts import EvidenceRecord, EvidenceSource, ValidationStatus
+from evidence.contracts import TimeFact
+from evidence.knowability import disclosure_fact, time_facts, aware_clock
 from providers.contract import ProviderEnvelope, ProviderStatus
 from providers.tdx_information import TdxInformationProvider, _json
 
@@ -116,7 +118,7 @@ def _items(data: Any, stock: str, *, research: bool) -> list[dict]:
     return records
 
 
-def _financial(data: Any, stock: str, view: str) -> list[dict]:
+def _financial(data: Any, stock: str, view: str, *, acquired_at=None, judgment_cutoff=None) -> list[dict]:
     if data == []:
         return []
     if not isinstance(data, dict):
@@ -143,10 +145,15 @@ def _financial(data: Any, stock: str, view: str) -> list[dict]:
         if report_date in dates:
             _reject("duplicate statement report_date")
         dates.add(report_date)
+        disclosure = disclosure_fact(row)
         # G0 supplies no units. No magnitude-based conversion or cash-flow
         # definition is safe. Nullable metrics stay NULL, even when raw has a
         # numeric candidate. Future mappings require a new audited contract.
         records.append({"stock_id": stock, "report_date": report_date,
+                        "publish_time": disclosure.value,
+                        "knowability": time_facts(period=report_date, period_basis="statement.row.日期",
+                            disclosure=disclosure, acquired_at=acquired_at,
+                            judgment_cutoff=judgment_cutoff),
                         **{metric: None for metric in FINANCIAL_METRICS},
                         "provider": SOURCE, "statement_view": view,
                         "data_quality_status": "UNVERIFIED", **summary})
@@ -172,10 +179,12 @@ def _digest(result: InformationNormalizationResult) -> str:
 
 
 def _normalization_rules(tool: str, view: str | None) -> tuple[InformationNormalizationRule, ...]:
-    rules = [("source_supplied_summary", InformationRuleId.INFO_SOURCE_SUMMARY_EXACT_COPY)]
+    rules = [("source_supplied_summary", InformationRuleId.INFO_SOURCE_SUMMARY_EXACT_COPY),
+             ("knowability", InformationRuleId.KNOWABILITY_FOUR_CLOCKS)]
     if view:
         rules.extend([
             ("report_date", InformationRuleId.FIN_REPORT_DATE_EXACT_ISO_DATE),
+            ("publish_time", InformationRuleId.FIN_DISCLOSURE_TIME_EXPLICIT_FIELD),
             ("statement_view", InformationRuleId.FIN_STATEMENT_VIEW_EXACT_ENTRY),
             *((metric, InformationRuleId.FIN_METRIC_UNIT_UNVERIFIED_NULL) for metric in FINANCIAL_METRICS),
         ])
@@ -223,16 +232,20 @@ class InformationNormalizer:
     """Validate one business response against its original append-only Evidence."""
 
     def normalize(self, envelope: ProviderEnvelope, *, source_evidence: EvidenceRecord,
-                  raw_bytes: bytes) -> InformationNormalizationResult:
+                  raw_bytes: bytes, acquired_at: str | None = None,
+                  judgment_cutoff: str | None = None) -> InformationNormalizationResult:
         try:
-            return self._normalize(envelope, source_evidence, raw_bytes)
+            for value in (acquired_at, judgment_cutoff):
+                if value is not None:
+                    aware_clock(value)
+            return self._normalize(envelope, source_evidence, raw_bytes, acquired_at, judgment_cutoff)
         except InformationNormalizationError:
             raise
         except Exception:
             # Never include raw content, request values or credentials in errors.
             raise InformationNormalizationError("information input failed shape validation") from None
 
-    def _normalize(self, envelope, evidence, raw_bytes):
+    def _normalize(self, envelope, evidence, raw_bytes, acquired_at, judgment_cutoff):
         if (type(envelope) is not ProviderEnvelope or envelope.provider_name != SOURCE
                 or envelope.status not in {ProviderStatus.AVAILABLE, ProviderStatus.NOT_AVAILABLE}):
             _reject("unsupported information Provider envelope")
@@ -291,7 +304,15 @@ class InformationNormalizer:
         data = TdxInformationProvider._data(response, tool=tool)
         if data != payload.get("data"):
             _reject("Provider data differs from original raw Evidence")
-        records = _financial(data, stock, view) if view else _items(data, stock, research=tool == "wenda_report_query")
+        records = (_financial(data, stock, view, acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)
+                   if view else _items(data, stock, research=tool == "wenda_report_query"))
+        if not view:
+            for row in records:
+                row["knowability"] = time_facts(period=None, period_basis="information.period_missing",
+                    disclosure=TimeFact(None, "information.publication_semantics_unverified"),
+                    acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)
+        if acquired_at is not None and aware_clock(acquired_at) < aware_clock(evidence.request_timestamp):
+            _reject("acquisition precedes source request")
         if (bool(records) and envelope.status != ProviderStatus.AVAILABLE
                 or not records and envelope.status != ProviderStatus.NOT_AVAILABLE):
             _reject("information availability contradicts response records")
@@ -302,6 +323,7 @@ class InformationNormalizer:
                                              warnings=("Nullable semantics remain UNVERIFIED",)))
                            for row in canonical)
         provenance = {"stock_id": stock, "tool": tool, "view": view,
+                      "judgment_cutoff": judgment_cutoff,
                       "source_evidence_id": evidence.evidence_id,
                       "endpoint_or_tool": evidence.endpoint_or_tool,
                       "request_params": evidence.request_params,

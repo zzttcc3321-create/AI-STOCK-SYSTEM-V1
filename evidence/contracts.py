@@ -7,6 +7,36 @@ from enum import Enum
 from typing import Any, Mapping
 
 
+@dataclass(frozen=True, slots=True)
+class TimeFact:
+    """One independent clock and its semantic basis, never a fallback clock.
+
+    value is an ISO date (period only) or an aware ISO timestamp. source_basis
+    names the exact source field or caller context. Missing/ambiguous clocks
+    remain UNVERIFIED; contradictory source clocks are CONFLICT.
+    """
+
+    value: str | None
+    source_basis: str
+    status: str = "UNVERIFIED"
+
+
+@dataclass(frozen=True, slots=True)
+class KnowabilityTimes:
+    """JSON sidecar/read-model extension; does not change EvidenceRecord/DB.
+
+    data_period: the period the observation belongs to, not publication.
+    disclosed_at: when this version became public, not provider/request time.
+    acquired_at: when this response was received, not request start time.
+    judgment_cutoff: the caller's historical decision boundary.
+    """
+
+    data_period: TimeFact
+    disclosed_at: TimeFact
+    acquired_at: TimeFact
+    judgment_cutoff: TimeFact
+
+
 class EvidenceSource(str, Enum):
     TUSHARE_MCP = "TUSHARE_MCP"
     TDX_OFFICIAL_LOCAL_HTTP = "TDX_OFFICIAL_LOCAL_HTTP"
