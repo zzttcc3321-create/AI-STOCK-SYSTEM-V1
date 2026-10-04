@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any, Mapping, Sequence
 
@@ -24,6 +24,9 @@ from .contracts import (
 
 DAILY_SOURCE = "TUSHARE_MCP"
 QUOTE_SOURCE = "TDX_OFFICIAL_LOCAL_HTTP"
+# Canonical A-share trade/report dates are China calendar days, independent of
+# the cutoff's textual offset. This does not supply a missing disclosure clock.
+_PERIOD_TIMEZONE = timezone(timedelta(hours=8))
 _EVIDENCE_FIELDS = frozenset({"evidence_id", "source", "request_timestamp",
                               "provider_timestamp", "validation_result", "human_confirm"})
 _DAILY_FIELDS = frozenset({"stock_id", "trade_date", "open", "high", "low", "close",
@@ -287,7 +290,8 @@ class AnalysisPackageBuilder:
             times["judgment_cutoff"] = {"value": judgment_cutoff,
                 "source_basis": "caller.judgment_cutoff", "status": "VERIFIED"}
             try:
-                reasons = list(cutoff_reasons(times, judgment_cutoff))
+                calendar = _PERIOD_TIMEZONE if "report_date" in row or "trade_date" in row else None
+                reasons = list(cutoff_reasons(times, judgment_cutoff, period_timezone=calendar))
                 period = row.get("report_date", row.get("trade_date", row.get("quote_timestamp")))
                 if period is not None and times["data_period"]["value"] != period:
                     reasons.append("SOURCE_TIME_CONFLICT")
@@ -310,6 +314,23 @@ class AnalysisPackageBuilder:
                 return restriction
             row["knowability"] = times
             return None
+
+        def historical_identity(row, identifiers):
+            # stock_id is the caller's lookup key, not a claim that the security
+            # existed at cutoff. The current identity contract has no historical
+            # validity proof for any other field, including name and industry.
+            for field in sorted(set(row) - {"stock_id"}):
+                value = row.pop(field)
+                if value is None:
+                    continue
+                path = f"stock_identity.{field}"
+                restrictions.append({"path": path, "status": "UNVERIFIED",
+                    "source": None, "usable_at_cutoff": False,
+                    "reason_codes": ["IDENTITY_ATTRIBUTE_TIME_UNVERIFIED"],
+                    "evidence_ids": identifiers})
+                missing.add(path)
+                warnings.add(f"{path}: UNVERIFIED historical validity")
+                incomplete.append(f"{path}: historical validity unverified; attribute excluded")
 
         def attach(row: dict[str, Any], path: str, source: str | None = None,
                    *, information_result: Any = None) -> dict[str, Any] | None:
@@ -334,10 +355,15 @@ class AnalysisPackageBuilder:
                         validate_information_evidence(information_result, typed.get(identifier))
                     except InformationNormalizationError as exc:
                         raise AnalysisInputError(str(exc)) from None
-            if historical_gate(row, path, identifiers, matched) is not None:
+            if path == "stock_identity" and judgment_cutoff is not None:
+                historical_identity(row, identifiers)
+            elif historical_gate(row, path, identifiers, matched) is not None:
                 return None
             used.update(identifiers)
-            return {"data": row, "evidence_ids": identifiers}
+            entry = {"data": row, "evidence_ids": identifiers}
+            if path == "stock_identity" and judgment_cutoff is not None:
+                entry["identity_scope"] = "LOOKUP_KEY_ONLY"
+            return entry
 
         identity_entry = attach(identity, "stock_identity")
         identity_block = _block([identity_entry] if identity_entry else [], reason=None if identity_entry else "Evidence unavailable")
@@ -482,6 +508,7 @@ class AnalysisPackageBuilder:
             "incomplete_reasons": sorted(set(incomplete)),
         }
         if judgment_cutoff is not None:
+            quality["data_period_calendar"] = "UTC+08:00; canonical trade/report calendar dates"
             quality["judgment_cutoff"] = {"value": judgment_cutoff,
                 "source_basis": "caller.judgment_cutoff", "status": "VERIFIED"}
             quality["knowability_restrictions"] = restrictions

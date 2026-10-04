@@ -1,7 +1,7 @@
 """Pure, conservative historical knowability rules for canonical sidecars."""
 
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import date, datetime, tzinfo
 from typing import Any, Mapping
 
 from .contracts import KnowabilityTimes, TimeFact
@@ -80,7 +80,13 @@ def validate_times(value: Mapping[str, Any]) -> None:
                 aware_clock(fact["value"])
 
 
-def cutoff_reasons(times: Mapping[str, Any], cutoff: str) -> tuple[str, ...]:
+def cutoff_reasons(times: Mapping[str, Any], cutoff: str, *,
+                   period_timezone: tzinfo | None = None) -> tuple[str, ...]:
+    """Compare date periods as calendar days in an explicitly supplied timezone.
+
+    A date is not a publication timestamp or an end-of-day availability claim.
+    Without a calendar contract, even a VERIFIED date remains unusable.
+    """
     validate_times(times)
     boundary = aware_clock(cutoff)
     reasons = []
@@ -95,8 +101,12 @@ def cutoff_reasons(times: Mapping[str, Any], cutoff: str) -> tuple[str, ...]:
     period = times["data_period"]
     if period["status"] != "VERIFIED":
         reasons.append("DATA_PERIOD_UNVERIFIED")
-    elif (date.fromisoformat(period["value"]) > boundary.date() if len(period["value"]) == 10
-          else aware_clock(period["value"]) > boundary):
+    elif len(period["value"]) == 10:
+        if period_timezone is None:
+            reasons.append("DATA_PERIOD_UNVERIFIED")
+        elif date.fromisoformat(period["value"]) > boundary.astimezone(period_timezone).date():
+            reasons.append("DATA_PERIOD_AFTER_CUTOFF")
+    elif aware_clock(period["value"]) > boundary:
         reasons.append("DATA_PERIOD_AFTER_CUTOFF")
     if all(times[name]["status"] == "VERIFIED" for name in ("disclosed_at", "acquired_at")):
         if aware_clock(times["disclosed_at"]["value"]) > aware_clock(times["acquired_at"]["value"]):

@@ -9,7 +9,7 @@ from analysis import AnalysisInputError, AnalysisPackageBuilder
 from analysis.prompt_builder import PromptBuilder
 from evidence import EvidenceBuilder, sha256_digest
 from evidence.contracts import TimeFact
-from evidence.knowability import time_facts
+from evidence.knowability import cutoff_reasons, time_facts
 from normalizer import DataNormalizer, InformationNormalizer, InformationNormalizationError
 from providers import ProviderEnvelope, ProviderStatus
 from test_analysis_package import package_arguments, STOCK
@@ -53,6 +53,115 @@ def restriction(package, path="financial_summary.0"):
 
 
 class KnowabilityTests(unittest.TestCase):
+    def test_report_date_uses_china_calendar_across_midnight_and_offsets(self):
+        _, _, arguments = financial(extra={"日期": "2026-04-15"})
+        self.assert_period_calendar(arguments, "financial_summary", "financial_summary.0")
+
+    def test_trade_date_uses_china_calendar_across_midnight_and_offsets(self):
+        arguments = package_arguments()
+        arguments["canonical_data"]["daily_kline"][0].update(
+            trade_date="2026-04-15", knowability=time_facts(
+                period="2026-04-15", period_basis="canonical.trade_date",
+                disclosure=TimeFact(DISCLOSED, "row.disclosure_time", "VERIFIED"),
+                acquired_at=ACQUIRED, judgment_cutoff=None))
+        arguments["evidence_metadata"][0]["request_timestamp"] = REQUESTED
+        self.assert_period_calendar(arguments, "daily_kline_summary", "daily_kline.0")
+
+    def assert_period_calendar(self, arguments, block, path):
+        original = deepcopy(arguments["stock_identity"])
+        boundaries = [
+            (("2026-04-14T23:59:59+08:00", "2026-04-14T15:59:59Z",
+              "2026-04-14T11:59:59-04:00"), False),
+            (("2026-04-15T00:00:00+08:00", "2026-04-14T16:00:00Z",
+              "2026-04-14T12:00:00-04:00"), True),
+            (("2026-04-15T01:00:00+08:00", "2026-04-14T17:00:00Z",
+              "2026-04-14T13:00:00-04:00"), True),
+        ]
+        for equivalents, retained in boundaries:
+            outcomes = []
+            for boundary in equivalents:
+                with self.subTest(block=block, cutoff=boundary):
+                    package = AnalysisPackageBuilder().build(**arguments, judgment_cutoff=boundary)
+                    self.assertEqual(bool(getattr(package, block)["records"]), retained)
+                    codes = () if retained else restriction(package, path)["reason_codes"]
+                    self.assertEqual(tuple(codes), () if retained else ("DATA_PERIOD_AFTER_CUTOFF",))
+                    outcomes.append(tuple(codes))
+                    self.assertIn("UTC+08:00", package.data_quality["data_period_calendar"])
+            self.assertEqual(len(set(outcomes)), 1)
+        self.assertEqual(arguments["stock_identity"], original)
+
+    def test_date_without_calendar_contract_is_explicitly_unverified(self):
+        times = time_facts(period="2026-04-15", period_basis="unknown.date",
+            disclosure=TimeFact(DISCLOSED, "row.disclosure_time", "VERIFIED"),
+            acquired_at=ACQUIRED, judgment_cutoff=CUTOFF)
+        for boundary in ("2026-04-15T01:00:00+08:00", "2026-04-14T17:00:00Z"):
+            self.assertEqual(cutoff_reasons(times, boundary), ("DATA_PERIOD_UNVERIFIED",))
+        times["data_period"] = {"value": "2026-04-14T17:00:00Z",
+                                "source_basis": "row.timestamp", "status": "VERIFIED"}
+        self.assertEqual(cutoff_reasons(times, "2026-04-15T01:00:00+08:00"), ())
+        self.assertEqual(cutoff_reasons(times, "2026-04-14T16:59:59Z"),
+                         ("DATA_PERIOD_AFTER_CUTOFF",))
+
+    def test_historical_identity_retains_evidenced_lookup_key_without_four_clocks(self):
+        for embedded_cutoff in (None, CUTOFF):
+            _, _, arguments = financial(cutoff=embedded_cutoff)
+            arguments["stock_identity"] = {"stock_id": STOCK}
+            original = deepcopy(arguments["stock_identity"])
+            package = AnalysisPackageBuilder().build(**arguments, judgment_cutoff=CUTOFF)
+            entry = package.stock_identity["records"][0]
+            self.assertEqual(entry["data"], {"stock_id": STOCK})
+            self.assertEqual(entry["evidence_ids"], ("EV-DAILY",))
+            self.assertEqual(entry["identity_scope"], "LOOKUP_KEY_ONLY")
+            self.assertIn("EV-DAILY", [item["evidence_id"] for item in package.evidence_index])
+            self.assertFalse(any(item["path"].startswith("stock_identity")
+                                 for item in package.data_quality["knowability_restrictions"]))
+            self.assertFalse(any(item.startswith("stock_identity")
+                                 for item in package.data_quality["incomplete_reasons"]))
+            self.assertEqual(arguments["stock_identity"], original)
+
+    def test_historical_identity_attributes_are_excluded_and_auditable(self):
+        _, _, arguments = financial()
+        arguments["stock_identity"].update(symbol="601518", industry="未来行业属性")
+        original = deepcopy(arguments["stock_identity"])
+        current = AnalysisPackageBuilder().build(**arguments)
+        self.assertEqual(current.stock_identity["records"][0]["data"], original)
+        package = AnalysisPackageBuilder().build(**arguments, judgment_cutoff=CUTOFF)
+        self.assertEqual(package.stock_identity["records"][0]["data"], {"stock_id": STOCK})
+        for field in ("symbol", "market", "name", "industry"):
+            path = "stock_identity." + field
+            limit = restriction(package, path)
+            self.assertEqual(limit["reason_codes"], ("IDENTITY_ATTRIBUTE_TIME_UNVERIFIED",))
+            self.assertFalse(limit["usable_at_cutoff"])
+            self.assertEqual(limit["evidence_ids"], ("EV-DAILY",))
+            self.assertIn(path, package.data_quality["missing_fields"])
+        inputs = PromptBuilder().inputs(package)
+        self.assertNotIn("未来行业属性", json.dumps(inputs, ensure_ascii=False))
+        self.assertNotIn("示意证券", package.to_json())
+        self.assertIn("IDENTITY_ATTRIBUTE_TIME_UNVERIFIED", json.dumps(inputs))
+        self.assertEqual(package.stock_identity["status"], "PASS")
+        self.assertEqual(package.data_quality["package_status"], "INCOMPLETE")
+        self.assertEqual(arguments["stock_identity"], original)
+
+    def test_historical_identity_still_requires_validated_evidence(self):
+        for mode in ("missing", "NOT_VALIDATED", "FAIL"):
+            arguments = package_arguments()
+            arguments["stock_identity"] = {"stock_id": STOCK}
+            arguments["canonical_data"] = {}
+            arguments["evidence_links"].pop("daily_kline.0")
+            if mode == "missing":
+                arguments["evidence_metadata"] = []
+            else:
+                arguments["evidence_metadata"][0]["validation_result"]["status"] = mode
+            with self.subTest(mode=mode):
+                if mode == "FAIL":
+                    with self.assertRaises(AnalysisInputError):
+                        AnalysisPackageBuilder().build(**arguments, judgment_cutoff=CUTOFF)
+                else:
+                    package = AnalysisPackageBuilder().build(**arguments, judgment_cutoff=CUTOFF)
+                    self.assertEqual(package.stock_identity["records"], ())
+                    self.assertIn("stock_identity.evidence", package.data_quality["missing_fields"])
+                    self.assertEqual(package.evidence_index, ())
+
     def test_four_independent_facts_and_disclosed_before_cutoff_usable(self):
         result, evidence, arguments = financial()
         row = result.canonical_data[0]
