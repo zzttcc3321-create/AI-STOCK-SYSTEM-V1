@@ -132,7 +132,7 @@ def _fallback(value: Any) -> dict[str, Any] | None:
 
 def _validate_market(row: dict[str, Any], kind: str, stock_id: str) -> tuple[str, ...]:
     required = _DAILY_FIELDS if kind == "daily_kline" else _QUOTE_FIELDS
-    optional = _PERSISTENCE_FIELDS | {"knowability"} | ({"adjust_status"} if kind == "daily_kline" else set())
+    optional = _PERSISTENCE_FIELDS | {"knowability"} | ({"adjust_status"} if kind == "daily_kline" else {"freshness_check"})
     if not required <= set(row) or set(row) - required - optional:
         raise AnalysisInputError("record does not match the existing canonical contract")
     if row["stock_id"] != stock_id:

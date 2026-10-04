@@ -5,10 +5,11 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from typing import Any, Mapping, Sequence
-from evidence.knowability import disclosure_fact, time_facts
+from evidence.knowability import aware_clock, disclosure_fact, time_facts
 
 from .contracts import (
-    ConversionRule, Freshness, MissingData, NormalizationResult, NormalizationRule,
+    FRESHNESS_REQUEST_MAX_GAP_SECONDS, FRESHNESS_STALE_AFTER_SECONDS,
+    ConversionRule, Freshness, FreshnessCheck, MissingData, NormalizationResult, NormalizationRule,
     NormalizedRecord, NumericField, UnitStatus,
 )
 from .validation import parse_trade_date, validate_daily, validate_quote
@@ -20,6 +21,68 @@ PRICE_FIELDS = ("open", "high", "low", "close", "pre_close")
 
 def _get(source: Any, name: str, default: Any = None) -> Any:
     return source.get(name, default) if isinstance(source, Mapping) else getattr(source, name, default)
+
+
+def _quote_freshness(source, envelope, acquired_at, judgment_cutoff):
+    timestamp_source = "provider.row.quote_timestamp" if "quote_timestamp" in source else "envelope.provider_timestamp"
+    timestamp = source.get("quote_timestamp", _get(envelope, "provider_timestamp"))
+    requested = _get(envelope, "request_timestamp")
+    reference, reference_source = next((value, basis) for value, basis in (
+        (judgment_cutoff, "caller.judgment_cutoff"),
+        (acquired_at, "caller.acquired_at"),
+        (requested, "envelope.request_timestamp"),
+        (None, "reference_missing"),
+    ) if value is not None or basis == "reference_missing")
+    declared = source.get("freshness")
+    reasons = []
+    if not isinstance(declared, str) or declared not in {item.value for item in Freshness}:
+        reasons.append("FRESHNESS_UNDECLARED" if declared is None else "INVALID_FRESHNESS_DECLARATION")
+        declared_state = Freshness.UNKNOWN.value
+    else:
+        declared_state = declared
+        if declared != Freshness.REALTIME.value:
+            reasons.append("DECLARED_" + declared)
+
+    def clock(value, name):
+        if value is None:
+            reasons.append(name + "_MISSING")
+            return None
+        try:
+            return aware_clock(value)
+        except (ValueError, TypeError):
+            reasons.append(name + "_INVALID")
+            return None
+
+    quote_clock = clock(timestamp, "QUOTE_TIMESTAMP")
+    reference_clock = clock(reference, "REFERENCE_TIME")
+    request_clock = clock(requested, "REQUEST_TIMESTAMP")
+    age = None
+    stale = False
+    limited = quote_clock is None or reference_clock is None or request_clock is None
+    max_age = FRESHNESS_STALE_AFTER_SECONDS
+    max_gap = FRESHNESS_REQUEST_MAX_GAP_SECONDS
+    if quote_clock is not None and reference_clock is not None:
+        age = (reference_clock - quote_clock).total_seconds()
+        if age < 0:
+            reasons.append("FUTURE_QUOTE_TIMESTAMP")
+            limited = True
+        elif age > max_age:
+            reasons.append("STALE_QUOTE_TIMESTAMP")
+            stale = True
+    if quote_clock is not None and acquired_at is not None:
+        if quote_clock > aware_clock(acquired_at):
+            reasons.append("QUOTE_AFTER_ACQUISITION")
+            limited = True
+    if request_clock is not None and reference_clock is not None:
+        gap = (reference_clock - request_clock).total_seconds()
+        if gap < 0 or gap > max_gap or (quote_clock is not None and
+                (quote_clock - request_clock).total_seconds() > max_gap):
+            reasons.append("REQUEST_TIME_MISMATCH")
+            limited = True
+    state = Freshness.UNKNOWN.value if limited else Freshness.STALE.value if stale else declared_state
+    check = FreshnessCheck(timestamp, timestamp_source, declared, requested, acquired_at,
+                           judgment_cutoff, reference, reference_source, age, tuple(reasons))
+    return timestamp, state, asdict(check)
 
 
 def _numeric(raw_value: Any, raw_unit: str | None, normalized_unit: str) -> NumericField:
@@ -134,11 +197,9 @@ class DataNormalizer:
         for quote in quotes:
             source = quote if isinstance(quote, Mapping) else {}
             numeric = {name: _numeric(source.get(name), declarations.get(name, declarations.get("price") if name in {"price", "bid", "ask"} else None), "股" if name == "volume" else "元") for name in ("price", "bid", "ask", "volume", "amount")}
-            timestamp = source.get("quote_timestamp", _get(envelope, "provider_timestamp"))
-            freshness = source.get("freshness", Freshness.UNKNOWN.value if timestamp is None else Freshness.REALTIME.value)
-            if freshness not in {item.value for item in Freshness}:
-                freshness = Freshness.UNKNOWN.value
-            values = {"stock_id": source.get("stock_id"), "quote_timestamp": timestamp, "freshness": freshness, "provider": _get(envelope, "provider_name")}
+            timestamp, freshness, check = _quote_freshness(source, envelope, acquired_at, judgment_cutoff)
+            values = {"stock_id": source.get("stock_id"), "quote_timestamp": timestamp, "freshness": freshness,
+                      "freshness_check": check, "provider": _get(envelope, "provider_name")}
             if acquired_at is not None or judgment_cutoff is not None:
                 values["knowability"] = time_facts(period=timestamp, period_basis="canonical.quote_timestamp",
                     disclosure=disclosure_fact(source, basis="provider.row"), acquired_at=acquired_at, judgment_cutoff=judgment_cutoff)
