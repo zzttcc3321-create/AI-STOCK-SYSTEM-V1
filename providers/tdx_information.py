@@ -18,7 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import uuid4
 
-from evidence import EvidenceBuilder
+from evidence import ArchiveIdentity, ArchiveWriter
 from .contract import ContractError, ContractErrorCode, ProviderEnvelope, ProviderStatus
 from .interface import Provider
 
@@ -239,7 +239,8 @@ class TdxInformationProvider(Provider):
 
     def __init__(self, transport=None, *, evidence_root: str | Path,
                  environ: Mapping[str, str] | None = None,
-                 clock=lambda: datetime.now(timezone.utc), timeout: float = 30) -> None:
+                 clock=lambda: datetime.now(timezone.utc), timeout: float = 30,
+                 archive_writer: ArchiveWriter | None = None) -> None:
         env = os.environ if environ is None else environ
         key = env.get("TDX_MCP_API_KEY")
         if not isinstance(key, str) or not key.strip() or any(c.isspace() for c in key):
@@ -248,7 +249,7 @@ class TdxInformationProvider(Provider):
             raise ValueError("timeout must be positive and finite")
         self._key = key
         self._transport = transport if transport is not None else MCPHTTPTransport()
-        self._root = Path(evidence_root)
+        self._archive = archive_writer or ArchiveWriter(evidence_root)
         self._clock, self._timeout = clock, timeout
         self._session = None
         self._version = PROTOCOL_VERSIONS[0]
@@ -283,10 +284,10 @@ class TdxInformationProvider(Provider):
     def _header(headers: Mapping[str, str], name: str) -> str | None:
         return next((v for k, v in headers.items() if k.lower() == name.lower()), None)
 
-    def _raw(self, response: MCPResponse, *, method: str, params: Mapping[str, Any],
+    def _archive_response(self, response: MCPResponse, *, method: str, params: Mapping[str, Any],
              context: Mapping[str, str], at: str, entries: list) -> None:
         data = response.body
-        if not isinstance(data, bytes):
+        if not isinstance(data, bytes) or len(data) > MAX_BODY_BYTES + 1:
             raise _Failure(ProviderStatus.VALIDATION_FAILED)
         # R6 takes precedence over raw retention if a hostile response echoes a key.
         if self._key.encode() in data or _encode(self._key)[1:-1] in data:
@@ -298,27 +299,20 @@ class TdxInformationProvider(Provider):
             raise _Failure(ProviderStatus.VALIDATION_FAILED)
         if not data and method == "notifications/initialized" and response.status == 202:
             return
-        raw_hash = hashlib.sha256(data).hexdigest()
-        path = self._root / context["system_run_id"] / context["collection_task_id"] / context["request_id"] / (uuid4().hex + ".json")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("xb") as file:
-            file.write(data)
-        stub = ProviderEnvelope(LOGICAL_SOURCE, context["data_kind"], ProviderStatus.VALIDATION_FAILED,
-                                at, None, str(path), None, None)
+        evidence_id = uuid4().hex
+        identity = ArchiveIdentity(context["system_run_id"], context["collection_task_id"],
+                                   context["request_id"], evidence_id)
         tool = params.get("name") if method == "tools/call" else method
-        record = EvidenceBuilder().build(
-            fetch_result=stub, endpoint_or_tool=f"{ENDPOINT}#{tool}",
+        receipt = self._archive.write(
+            identity=identity, source=LOGICAL_SOURCE, raw_parts={"response": data},
+            endpoint_or_tool=f"{ENDPOINT}#{tool}",
             request_params={"method": method, "params": params,
                             "stock_id": context.get("stock_id"), "request_day": at[:10]},
-            collection_task_id=context["collection_task_id"], system_run_id=context["system_run_id"],
-            raw_response_hash=raw_hash,
-        )
-        metadata = {"record": _plain(record), "http_status": response.status,
-                    "raw_response_complete": len(data) <= MAX_BODY_BYTES,
-                    "actual_provider_service": ACTUAL_PROVIDER_SERVICE}
-        with path.with_suffix(".evidence.json").open("xb") as file:
-            file.write(_encode(metadata))
-        entries.append({**metadata, "raw_bytes": data})
+            request_timestamp=at, source_reference=f"{ENDPOINT}#{tool}", secrets=(self._key,),
+            attributes={"http_status": response.status, "raw_response_complete": len(data) <= MAX_BODY_BYTES,
+                        "actual_provider_service": ACTUAL_PROVIDER_SERVICE})
+        entries.append({"record": _plain(receipt["record"]), **receipt["metadata"]["attributes"],
+                        "raw_bytes": data})
 
     def _rpc(self, method: str, params: Mapping[str, Any], *, context, at, entries,
              notification: bool = False):
@@ -341,7 +335,7 @@ class TdxInformationProvider(Provider):
             raise _Failure(ProviderStatus.AUTH_FAILED) from None
         except OSError:
             raise _Failure(ProviderStatus.NOT_AVAILABLE) from None
-        self._raw(response, method=method, params=params, context=context, at=at, entries=entries)
+        self._archive_response(response, method=method, params=params, context=context, at=at, entries=entries)
         if response.status in (401, 403):
             raise _Failure(ProviderStatus.AUTH_FAILED)
         if response.status == 404 and self._session:

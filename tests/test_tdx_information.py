@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
+from evidence import ArchiveReader
 from providers import ProviderStatus, TdxInformationProvider
 from providers.tdx_information import (
     ACTUAL_PROVIDER_SERVICE, ENDPOINT, LOGICAL_SOURCE, MAX_BODY_BYTES,
@@ -435,7 +436,7 @@ class ProviderTests(unittest.TestCase):
         for entry, body in zip(entries, self.transport.raw_bodies):
             record = entry["record"]
             self.assertEqual(entry["raw_bytes"], body)
-            self.assertEqual(Path(record["raw_response_path"]).read_bytes(), body)
+            self.assertEqual(ArchiveReader(self.root).read(record["raw_response_path"])["raw_parts"]["response"], body)
             self.assertEqual(record["raw_response_hash"], hashlib.sha256(body).hexdigest())
             self.assertEqual(record["source"], LOGICAL_SOURCE)
             self.assertEqual(entry["actual_provider_service"], ACTUAL_PROVIDER_SERVICE)
@@ -443,8 +444,8 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(entries[-1]["record"]["endpoint_or_tool"], ENDPOINT + "#wenda_report_query")
         self.assertEqual(entries[-1]["record"]["request_params"]["params"]["arguments"]["bdate"], "20261001")
         self.assertEqual(result.raw_reference, entries[-1]["record"]["raw_response_path"])
-        sidecar = Path(result.raw_reference).with_suffix(".evidence.json")
-        self.assertEqual(json.loads(sidecar.read_bytes())["record"], entries[-1]["record"])
+        sidecar = ArchiveReader(self.root).read(result.raw_reference)["metadata"]
+        self.assertEqual(sidecar["record"], entries[-1]["record"])
         self.assertNotIn("TEST_KEY_ONLY", str(result))
         self.assertTrue(all(b"TEST_KEY_ONLY" not in p.read_bytes() for p in self.root.rglob("*.json")))
 
@@ -743,7 +744,7 @@ class ProviderTests(unittest.TestCase):
         result = self.provider.fetch(query())
         self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
         record = result.payload["evidence"][-1]["record"]
-        self.assertEqual(Path(record["raw_response_path"]).read_bytes(), b"")
+        self.assertEqual(ArchiveReader(self.root).read(record["raw_response_path"])["raw_parts"]["response"], b"")
         self.assertEqual(record["raw_response_hash"], hashlib.sha256(b"").hexdigest())
 
     def test_timeout_configuration_rejects_invalid_values(self):
@@ -769,10 +770,9 @@ class ResponseNormalizationTests(unittest.TestCase):
         result = self.provider.fetch(query(tool, **changes))
         for entry in result.payload["evidence"]:
             record, raw = entry["record"], entry["raw_bytes"]
-            self.assertEqual(Path(record["raw_response_path"]).read_bytes(), raw)
+            self.assertEqual(ArchiveReader(self.root).read(record["raw_response_path"])["raw_parts"]["response"], raw)
             self.assertEqual(record["raw_response_hash"], hashlib.sha256(raw).hexdigest())
-            self.assertEqual(json.loads(Path(record["raw_response_path"]).with_suffix(
-                ".evidence.json").read_bytes())["record"], record)
+            self.assertEqual(ArchiveReader(self.root).read(record["raw_response_path"])["metadata"]["record"], record)
             self.assertNotIn(b"TEST_KEY_ONLY", raw)
         self.assertEqual(result.payload["canonical_data"], [])
         self.assertTrue(self.provider.validate_contract(result).valid)

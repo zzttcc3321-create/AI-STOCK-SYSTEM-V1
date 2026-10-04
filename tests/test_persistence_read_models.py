@@ -97,7 +97,7 @@ class ReadModelTests(unittest.TestCase):
                 self.assertEqual(value[key], expected)
             self.assertEqual(value["evidence_completeness"], "PARTIAL_DB_PROJECTION")
         for value in result["evidence"]:
-            self.assertIsNone(value["validation_result"])
+            self.assertEqual(value["validation_result"], {"status": "PASS", "failures": []})
             self.assertEqual(value["current_confirm_state"], "UNKNOWN")
             self.assertTrue(all(h is None for h in value["hashes"].values()))
         self.assertIsNone(self.evidence.evidence("missing"))

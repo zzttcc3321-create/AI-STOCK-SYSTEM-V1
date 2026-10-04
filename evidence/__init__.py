@@ -15,3 +15,10 @@ __all__ = [
     "evidence_index", "replay_review", "require_confirmed_conclusion",
     "sanitize_request_params", "sha256_digest",
 ]
+
+from .archive_contracts import ArchiveError, ArchiveIdentity
+from .archive_resolver import ArchiveResolver
+from .archive_writer import ArchiveWriter
+from .archive_reader import ArchiveReader
+
+__all__ += ["ArchiveError", "ArchiveIdentity", "ArchiveResolver", "ArchiveWriter", "ArchiveReader"]

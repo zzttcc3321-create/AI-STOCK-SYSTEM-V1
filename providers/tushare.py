@@ -10,6 +10,8 @@ import socket
 from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
 
+from evidence import ArchiveIdentity, ArchiveWriter
+from evidence.archive_contracts import plain
 from .contract import ContractError, ContractErrorCode, ProviderEnvelope, ProviderStatus
 from .interface import Provider
 
@@ -17,6 +19,7 @@ PROVIDER_NAME = "TUSHARE_MCP"
 DATA_KIND = "historical_daily"
 CONNECT_TIMEOUT_SECONDS = 10
 READ_TIMEOUT_SECONDS = 30
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 TUSHARE_API_URL = "https://api.tushare.pro"
 REQUIRED_BAR_FIELDS = frozenset(
     {"open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount"}
@@ -33,6 +36,19 @@ class TushareTransport(Protocol):
     def health_check(self, token: str, *, connect_timeout: int, read_timeout: int) -> bool: ...
 
 
+class RawHTTPFailure(ValueError):
+    def __init__(self, raw_bytes):
+        super().__init__("Tushare response JSON validation failed")
+        self.raw_bytes = raw_bytes
+
+
+class RawHTTPResponse(dict):
+    """Parsed response plus exact pre-parse HTTP entity bytes."""
+    def __init__(self, parsed, raw_bytes):
+        super().__init__(parsed)
+        self.raw_bytes = raw_bytes
+
+
 class HTTPTransport:
     """Minimal Tushare HTTP transport; secrets are never retained or logged."""
 
@@ -47,19 +63,37 @@ class HTTPTransport:
                 connection.sock.settimeout(read_timeout)
             connection.request("POST", "/", body=encoded, headers={"Content-Type": "application/json"})
             response = connection.getresponse()
+            data = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(data) > MAX_RESPONSE_BYTES:
+                raise ValueError("Tushare response size limit")
             if response.status >= 400:
-                raise OSError(f"Tushare HTTP status {response.status}")
-            return json.loads(response.read().decode("utf-8"))
+                failure = OSError("Tushare HTTP rejection")
+                failure.raw_bytes = data
+                raise failure
+            try:
+                parsed = json.loads(data.decode("utf-8"))
+                if type(parsed) is not dict:
+                    raise ValueError("response must be an object")
+            except (ValueError, UnicodeError):
+                raise RawHTTPFailure(data) from None
+            return RawHTTPResponse(parsed, data)
         finally:
             connection.close()
 
     def _query(
         self, token: str, api_name: str, params: Mapping[str, Any], fields: str,
-        connect_timeout: int, read_timeout: int,
+        connect_timeout: int, read_timeout: int, *, raw_parts=None,
     ) -> Mapping[str, Any]:
-        result = self._post({
-            "api_name": api_name, "token": token, "params": dict(params), "fields": fields
-        }, connect_timeout, read_timeout)
+        try:
+            result = self._post({
+                "api_name": api_name, "token": token, "params": dict(params), "fields": fields
+            }, connect_timeout, read_timeout)
+        except (ValueError, OSError) as exc:
+            if raw_parts is not None and hasattr(exc, "raw_bytes"):
+                raw_parts[api_name] = exc.raw_bytes
+            raise
+        if raw_parts is not None:
+            raw_parts[api_name] = result.raw_bytes
         if result.get("code") != 0:
             raise PermissionError("Tushare rejected the request")
         return result
@@ -74,19 +108,24 @@ class HTTPTransport:
         self, token: str, stock_id: str, date_from: str, date_to: str, *, connect_timeout: int, read_timeout: int
     ) -> Mapping[str, Any]:
         params = {"ts_code": stock_id, "start_date": date_from, "end_date": date_to}
-        daily = self._query(token, "daily", params, "", connect_timeout, read_timeout)
-        factors = self._query(
-            token, "adj_factor", params, "ts_code,trade_date,adj_factor", connect_timeout, read_timeout
-        )
-        calendar = self._query(
-            token, "trade_cal", {"start_date": date_from, "end_date": date_to, "is_open": "1"},
-            "cal_date", connect_timeout, read_timeout,
-        )
+        raw_parts = {}
+        try:
+            daily = self._query(token, "daily", params, "", connect_timeout, read_timeout, raw_parts=raw_parts)
+            factors = self._query(
+                token, "adj_factor", params, "ts_code,trade_date,adj_factor", connect_timeout, read_timeout,
+                raw_parts=raw_parts)
+            calendar = self._query(
+                token, "trade_cal", {"start_date": date_from, "end_date": date_to, "is_open": "1"},
+                "cal_date", connect_timeout, read_timeout, raw_parts=raw_parts)
+        except (ValueError, OSError) as exc:
+            exc.raw_parts = raw_parts
+            raise
         factor_by_date = {row["trade_date"]: row.get("adj_factor") for row in self._rows(factors)}
         bars = self._rows(daily)
         for bar in bars:
             bar["adj_factor"] = factor_by_date.get(bar.get("trade_date"))
         return {
+            "raw_parts": raw_parts,
             "bars": bars,
             "expected_trade_dates": [row["cal_date"] for row in self._rows(calendar)],
             "raw_reference": f"tushare://daily/{stock_id}/{date_from}/{date_to}",
@@ -116,9 +155,11 @@ def _parse_date(value: Any) -> date:
 class TushareMCPProvider(Provider):
     """Historical-daily-only adapter implementing the frozen provider contract."""
 
-    def __init__(self, transport: TushareTransport | None = None, *, environ: Mapping[str, str] | None = None) -> None:
+    def __init__(self, transport: TushareTransport | None = None, *, environ: Mapping[str, str] | None = None,
+                 archive_writer: ArchiveWriter | None = None) -> None:
         self._transport = transport or HTTPTransport()
         self._environ = os.environ if environ is None else environ
+        self._archive = archive_writer
 
     def describe(self) -> Mapping[str, Any]:
         return {
@@ -172,25 +213,52 @@ class TushareMCPProvider(Provider):
             )
 
         normalized_from, normalized_to = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+        source_reference = f"tushare://daily/{stock_id}/{normalized_from}/{normalized_to}"
+        try:
+            identity = ArchiveIdentity(*(request.get(k, uuid4().hex) for k in
+                ("system_run_id", "collection_task_id", "request_id", "evidence_id"))) if self._archive else None
+        except ValueError:
+            return self._envelope(data_kind=DATA_KIND, status=ProviderStatus.VALIDATION_FAILED, requested_at=requested_at)
+
+        def archive(parts, reference):
+            return self._archive.write(
+                identity=identity, source=PROVIDER_NAME, raw_parts=parts, endpoint_or_tool="daily+adj_factor+trade_cal",
+                request_params={"stock_id": stock_id, "date_from": normalized_from, "date_to": normalized_to},
+                request_timestamp=requested_at, source_reference=reference, secrets=(token,))
+
         try:
             raw = self._transport.fetch_daily(
                 token, stock_id, normalized_from, normalized_to,
-                connect_timeout=CONNECT_TIMEOUT_SECONDS, read_timeout=READ_TIMEOUT_SECONDS,
-            )
-        except PermissionError:
-            return self._envelope(
-                data_kind=DATA_KIND, status=ProviderStatus.AUTH_FAILED, requested_at=requested_at,
-                error=ContractError(ContractErrorCode.INVALID_STATUS, "Tushare authorization failed"),
-            )
-        except (TimeoutError, socket.timeout):
-            return self._envelope(data_kind=DATA_KIND, status=ProviderStatus.TIMEOUT, requested_at=requested_at)
-        except (OSError, ValueError, TypeError):
-            return self._envelope(data_kind=DATA_KIND, status=ProviderStatus.UNAVAILABLE, requested_at=requested_at)
+                connect_timeout=CONNECT_TIMEOUT_SECONDS, read_timeout=READ_TIMEOUT_SECONDS)
+        except (OSError, ValueError, TypeError) as exc:
+            status = (ProviderStatus.AUTH_FAILED if isinstance(exc, PermissionError) else
+                      ProviderStatus.TIMEOUT if isinstance(exc, TimeoutError) else ProviderStatus.UNAVAILABLE)
+            reference = None
+            if self._archive is not None and getattr(exc, "raw_parts", None):
+                try:
+                    reference = archive(exc.raw_parts, source_reference)["uri"]
+                except (OSError, ValueError, TypeError):
+                    status = ProviderStatus.UNAVAILABLE
+            return self._envelope(data_kind=DATA_KIND, status=status, requested_at=requested_at, raw_reference=reference)
 
-        raw_reference = raw.get("raw_reference") or f"tushare://response/{uuid4()}"
+        raw_reference = raw.get("raw_reference") or source_reference
+        archive_record = None
+        if self._archive is not None:
+            try:
+                parts = raw.get("raw_parts")
+                if type(parts) is not dict or list(parts) != ["daily", "adj_factor", "trade_cal"]:
+                    raise ValueError("three exact Tushare raw parts required")
+                receipt = archive(parts, str(raw_reference))
+                raw_reference, archive_record = receipt["uri"], receipt["record"]
+            except (OSError, ValueError, TypeError):
+                return self._envelope(data_kind=DATA_KIND, status=ProviderStatus.UNAVAILABLE, requested_at=requested_at)
         bars = raw.get("bars")
         report = self._validate_bars(bars, raw.get("expected_trade_dates"))
         payload = {"bars": bars, "validation": report, "adjustment_basis": "adj_factor_per_trade_date"}
+        if archive_record is not None:
+            payload["archive_record"] = plain(archive_record)
+            payload["source_reference"] = receipt["metadata"]["source_reference"]
+            payload["raw_response_hash"] = archive_record.raw_response_hash
         if report["errors"]:
             return self._envelope(
                 data_kind=DATA_KIND, status=ProviderStatus.VALIDATION_FAILED, requested_at=requested_at,

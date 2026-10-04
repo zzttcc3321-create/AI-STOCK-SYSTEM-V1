@@ -14,11 +14,20 @@ def text(value):
     return value
 
 
-EVIDENCE_LIMITATIONS = {
-    "metadata_availability": "UNAVAILABLE",
-    "metadata_reason": "SIDECAR_PHYSICAL_CONTRACT_NOT_IMPLEMENTED",
-    "integrity_status": "NOT_VERIFIED",
-}
+def evidence_limitations(status="NO_READER_CONFIG"):
+    if status == "VERIFIED_ARCHIVE":
+        return {"metadata_availability": "AVAILABLE", "metadata_reason": "VERIFIED_ARCHIVE",
+                "integrity_status": "VERIFIED"}
+    if status == "CORRUPT_ARCHIVE":
+        return {"metadata_availability": "AVAILABLE", "metadata_reason": "CORRUPT_ARCHIVE",
+                "integrity_status": "CORRUPT"}
+    return {"metadata_availability": "UNAVAILABLE", "metadata_reason": status,
+            "integrity_status": "NOT_VERIFIED"}
+
+
+# Compatibility projection for callers without a reader. Live read models use
+# evidence_limitations() for each result, never this default as an integrity gate.
+EVIDENCE_LIMITATIONS = evidence_limitations()
 
 
 def replay_events(events):
