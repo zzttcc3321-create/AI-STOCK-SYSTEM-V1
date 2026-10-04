@@ -174,3 +174,44 @@ class AdjustmentSemanticsTests(unittest.TestCase):
         args = package_arguments(quote=True)
         args["canonical_data"]["market_quotes"] = result.canonical_data
         with self.assertRaises(AnalysisInputError): AnalysisPackageBuilder().build(**args)
+
+    def test_batch_quote_inherits_payload_adjustment_and_gate_rejects_it(self):
+        for basis in ("QFQ", "HFQ", None, "INVALID"):
+            with self.subTest(basis=basis):
+                raw = envelope(kind="market_quotes", provider="TDX_OFFICIAL_LOCAL_HTTP", payload={
+                    "adjust_type": basis, "adjust_status": "VERIFIED",
+                    "quotes": [{"stock_id": "601518.SH", "price": 10},
+                               {"stock_id": "601518.SH", "price": 11}]})
+                original = deepcopy(raw)
+                result = DataNormalizer().normalize(raw, units={"price": "元"})
+                self.assertEqual(raw, original)
+                self.assertEqual(result.raw_data, original)
+                self.assertEqual(len(result.canonical_data), 2)
+                for row in result.canonical_data:
+                    self.assertEqual(row["adjustment_basis"], basis if basis in {"QFQ", "HFQ"} else "UNKNOWN")
+                    step = next(step for step in row["conversion_chain"] if step["field"] == "adjustment_basis")
+                    self.assertEqual(step["source"], "TDX_OFFICIAL_LOCAL_HTTP.payload.adjust_type")
+                args = package_arguments(quote=True)
+                args["canonical_data"]["market_quotes"] = result.canonical_data
+                with self.assertRaises(AnalysisInputError): AnalysisPackageBuilder().build(**args)
+
+    def test_batch_quote_conflicting_adjustment_declarations_fail_closed(self):
+        for row_declaration in ({"adjust_type": "UNADJUSTED"}, {"adjust_type": "HFQ"},
+                                {"adjust_type": None}, {"adjust_status": "UNVERIFIED"},
+                                {"adjust_status": None}):
+            with self.subTest(row_declaration=row_declaration):
+                raw = envelope(kind="market_quotes", provider="TDX_OFFICIAL_LOCAL_HTTP", payload={
+                    "adjust_type": "QFQ", "adjust_status": "VERIFIED",
+                    "quotes": [{"stock_id": "601518.SH", "price": 10, **row_declaration}]})
+                with self.assertRaisesRegex(ValueError, "conflicts with payload declaration"):
+                    DataNormalizer().normalize(raw, units={"price": "元"})
+
+    def test_batch_quote_matching_or_absent_adjustment_declarations(self):
+        for declarations in ({}, {"adjust_type": "UNADJUSTED", "adjust_status": "VERIFIED"},
+                             {"adjust_type": "QFQ", "adjust_status": "VERIFIED"}):
+            with self.subTest(declarations=declarations):
+                raw = envelope(kind="market_quotes", provider="TDX_OFFICIAL_LOCAL_HTTP", payload={**declarations,
+                    "quotes": [{"stock_id": "601518.SH", "price": 10, **declarations}]})
+                result = DataNormalizer().normalize(raw, units={"price": "元"})
+                self.assertEqual(result.canonical_data[0]["adjustment_basis"],
+                                 declarations.get("adjust_type", "UNADJUSTED"))

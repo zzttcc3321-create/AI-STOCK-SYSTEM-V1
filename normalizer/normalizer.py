@@ -211,7 +211,11 @@ class DataNormalizer:
             quotes = [payload]
         records, canonical = [], []
         for quote in quotes:
-            semantic_declarations = {key: payload[key] for key in ("period", "field_semantics", "rule_version") if key in payload}
+            semantic_declarations = {key: payload[key] for key in ("period", "field_semantics", "rule_version", "adjust_type", "adjust_status") if key in payload}
+            if isinstance(quote, Mapping):
+                for key in ("adjust_type", "adjust_status"):
+                    if key in semantic_declarations and key in quote and quote[key] != semantic_declarations[key]:
+                        raise ValueError(f"quote {key} conflicts with payload declaration")
             source = {**semantic_declarations, **quote} if isinstance(quote, Mapping) else {}
             numeric = {name: _numeric(source.get(name), declarations.get(name, declarations.get("price") if name in {"price", "bid", "ask"} else None), "股" if name == "volume" else "元") for name in ("price", "bid", "ask", "volume", "amount")}
             timestamp, freshness, check = _quote_freshness(source, envelope, acquired_at, judgment_cutoff)
@@ -219,6 +223,10 @@ class DataNormalizer:
                       "freshness_check": check, "provider": _get(envelope, "provider_name")}
             values.update(metadata(source, _get(envelope, "provider_name"), "market_quotes", numeric))
             for step in values["conversion_chain"]:
+                if step["field"] == "adjustment_basis" and "adjust_type" in source:
+                    step["source"] = (f"{_get(envelope, 'provider_name')}.payload.adjust_type"
+                                      if "adjust_type" in semantic_declarations and "adjust_type" not in quote
+                                      else f"{_get(envelope, 'provider_name')}.row.adjust_type")
                 if step["field"] in semantic_declarations and isinstance(quote, Mapping) and step["field"] not in quote:
                     step["source"] = f"{_get(envelope, 'provider_name')}.payload.{step['field']}"
                 if "input_unit" in step:
