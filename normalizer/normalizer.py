@@ -28,13 +28,19 @@ def _quote_freshness(source, envelope, acquired_at, judgment_cutoff):
     timestamp_source = "provider.row.quote_timestamp" if "quote_timestamp" in source else "envelope.provider_timestamp"
     timestamp = source.get("quote_timestamp", _get(envelope, "provider_timestamp"))
     requested = _get(envelope, "request_timestamp")
+    return evaluate_quote_freshness(timestamp, timestamp_source, source.get("freshness"),
+                                    requested, acquired_at, judgment_cutoff)
+
+
+def evaluate_quote_freshness(timestamp, timestamp_source, declared, requested,
+                             acquired_at, judgment_cutoff):
+    """Pure clock check, also reusable with sealed canonical collection facts."""
     reference, reference_source = next((value, basis) for value, basis in (
         (judgment_cutoff, "caller.judgment_cutoff"),
         (acquired_at, "caller.acquired_at"),
         (requested, "envelope.request_timestamp"),
         (None, "reference_missing"),
     ) if value is not None or basis == "reference_missing")
-    declared = source.get("freshness")
     reasons = []
     if not isinstance(declared, str) or declared not in {item.value for item in Freshness}:
         reasons.append("FRESHNESS_UNDECLARED" if declared is None else "INVALID_FRESHNESS_DECLARATION")
