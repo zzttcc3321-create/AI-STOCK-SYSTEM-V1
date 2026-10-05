@@ -1,5 +1,4 @@
 from contextlib import nullcontext
-import os
 from pathlib import Path
 import stat
 import tempfile
@@ -44,19 +43,21 @@ class ArchiveResolverTests(unittest.TestCase):
 
     def test_symlink_before_parent_traversal_rejected(self):
         linked = self.symlink()
-        if not linked:
-            with marked_reparse_point(self.link), \
-                    self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
-                ArchiveResolver(self.link / '..' / 'archive')
-            return
+        context = marked_reparse_point(self.link) if not linked else nullcontext()
         (self.base / 'archive').mkdir()
         (self.target.parent / 'archive').mkdir()
         absolute = self.link / '..' / 'archive'
-        self.assertNotEqual(os.path.abspath(absolute), os.path.realpath(absolute))
-        for root in (absolute, Path('link') / '..' / 'archive'):
-            with self.subTest(root=root), patch('pathlib.Path.cwd', return_value=self.base):
-                with self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
-                    ArchiveResolver(root)
+        with context:
+            # Check the security marker itself: realpath need not resolve the
+            # reparse-point fixture used without Windows symlink privileges.
+            info = self.link.lstat()
+            self.assertTrue(stat.S_ISLNK(info.st_mode) or
+                            getattr(info, 'st_file_attributes', 0) & 0x400)
+            for root in (absolute, Path('link') / '..' / 'archive'):
+                with self.subTest(root=root), patch('pathlib.Path.cwd', return_value=self.base):
+                    self.assertIn('..', root.parts)
+                    with self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
+                        ArchiveResolver(root)
 
     def test_reparse_point_in_original_root_chain_rejected(self):
         junction = self.base / 'junction'
