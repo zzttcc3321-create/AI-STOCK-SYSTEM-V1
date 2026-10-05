@@ -74,13 +74,9 @@ class ArchiveWriter:
         require(extra <= self._disk_usage(self.resolver.root).free, "ARCHIVE_DISK_FULL")
 
     def _sync_dir(self, path):
-        # Windows cannot open directories through os.open and exposes no
-        # directory fsync primitive. File contents are still fsynced before the
-        # atomic rename; only the additional parent-directory flush is omitted.
-        directory_flag = getattr(os, "O_DIRECTORY", None)
-        if os.name == "nt" or directory_flag is None:
-            return
-        fd = os.open(path, os.O_RDONLY | directory_flag | getattr(os, "O_NOFOLLOW", 0))
+        # Windows lacks a directory fsync in the stdlib. Fail closed instead of
+        # claiming a durable commit on a platform without this primitive.
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
         try:
             os.fsync(fd)
         finally:

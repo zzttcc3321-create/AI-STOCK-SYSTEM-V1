@@ -8,13 +8,14 @@ import unittest
 from evidence import ArchiveWriter, ArchiveReader, ArchiveError
 from evidence.archive_contracts import (SIDECAR_NAME, canonical_json, sealed, sha256)
 from test_evidence_archive_writer import write, ID
-from windows_compat import marked_reparse_point, symlink_privilege_missing
+from windows_compat import marked_reparse_point, symlink_privilege_missing, use_simulated_directory_fsync
 
 
 class ArchiveReaderTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        use_simulated_directory_fsync(self)
         self.writer = ArchiveWriter(Path(self.temp.name) / 'archive')
         self.reader = self.writer.reader
         self.receipt = write(self.writer)

@@ -15,12 +15,14 @@ from persistence.read_models import EvidenceReadRepository, AnalysisReadReposito
 from test_human_confirmation import STAMP, source_records
 from test_persistence_repository import persist_run
 from test_persistence_schema_v1_1 import fixture
+from windows_compat import use_simulated_directory_fsync
 
 
 class PersistenceArchiveIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        use_simulated_directory_fsync(self)
         self.root = Path(self.temp.name) / 'archive'
         self.writer = ArchiveWriter(self.root)
         self.db = configure(sqlite3.connect(':memory:'))
