@@ -121,6 +121,9 @@ class _Context:
             "financial_data": self.inputs["financial_data"],
             **{f"intelligence_data.{key}": value for key, value in self.inputs["intelligence_data"].items()},
         }
+        retained_ids = {identifier for block in self.blocks.values()
+                        for entry in block["records"] for identifier in entry["evidence_ids"]}
+        self.ids.intersection_update(retained_ids)
         self.market_ids = {identifier for key in ("canonical_market_data.daily_kline", "canonical_market_data.market_quotes")
                            for entry in self.blocks[key]["records"] for identifier in entry["evidence_ids"]}
 
@@ -227,7 +230,9 @@ class SevenFieldValidator:
         confidence = output["confidence"]["content"]["assessment"]
         for name, field in output.items():
             identifiers = set(field["evidence_ids"])
-            _require(identifiers <= context.ids, "unknown or out-of-prompt evidence_id")
+            _require(identifiers <= context.ids,
+                     "unknown or out-of-prompt evidence_id (no retained record support): "
+                     + ", ".join(sorted(identifiers - context.ids)))
             used.update(identifiers)
             content = field["content"]
             refs = field.get("input_refs", [])
