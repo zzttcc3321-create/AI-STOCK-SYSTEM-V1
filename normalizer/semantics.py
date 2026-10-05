@@ -73,3 +73,70 @@ def validate_metadata(row, kind):
 
     if not (set(expected) | {"stock_id", "period", "adjustment_basis"}) <= {step["field"] for step in chain}:
         raise ValueError("conversion chain does not cover canonical fields")
+    _validate_conversion_chain(row, kind, expected)
+
+
+def _validate_conversion_chain(row, kind, expected):
+    """Check the frozen V1 mapping, without editing or replaying any step."""
+    daily = kind == "daily_kline"
+    numeric = set(expected) | ({"pre_close"} if daily else set())
+    declarations = {
+        "stock_id": ("FIELD_MAPPING", {"row.stock_id", "row.ts_code"} if daily else {"row.stock_id"}),
+        "period": ("DECLARED_PERIOD_OR_DATA_KIND", {"row.period", "payload.period", "envelope.data_kind"}),
+        "adjustment_basis": ("PROVIDER_BASIS_NO_CONVERSION",
+                             {"row.adjust_type"} if daily else {"row.price", "row.adjust_type", "payload.adjust_type"}),
+        "field_semantics": ("FIELD_MAPPING", {"row.field_semantics", "payload.field_semantics", f"contract.{kind}"}),
+    }
+    if daily:
+        declarations["trade_date"] = ("TRADE_DATE_ISO", {"row.trade_date"})
+    seen = set()
+    for step in row["conversion_chain"]:
+        field, rule = step["field"], step["rule"]
+        semantic = expected.get(field, "PREVIOUS_CLOSING_PRICE" if field == "pre_close" else field)
+
+        def reject(reason):
+            raise ValueError(
+                f"conversion chain inconsistent: {field}={semantic}; source={step['source']}; "
+                f"rule={rule}; {step.get('input_unit')}->{step.get('target_unit')}; {reason}")
+
+        # V1 emits one direct transformation per field; it has no audited
+        # composition rule that could justify duplicate or competing steps.
+        if field in seen:
+            reject("duplicate or conflicting steps for canonical field")
+        seen.add(field)
+        source = step["source"][len(row["provider"]) + 1:]
+        if field not in numeric:
+            if field not in declarations:
+                reject("field is not part of the canonical semantics contract")
+            required_rule, sources = declarations[field]
+            if rule != required_rule or source not in sources:
+                reject("field, source and declaration rule conflict")
+            if "input_unit" in step or "target_unit" in step:
+                reject("non-numeric declaration cannot carry numeric units")
+            continue
+        sources = {f"row.{field}"} | ({"row.vol"} if field == "volume" else set())
+        target = "股" if field == "volume" else "元"
+        rules = {"IDENTITY"} | ({"LOT100_TO_SHARE"} if field == "volume" else
+                                {"TEN_THOUSAND_YUAN_TO_YUAN"} if field == "amount" else set())
+        if source not in sources or rule not in rules:
+            reject("field semantics, source and conversion rule conflict")
+        has_input, has_target = "input_unit" in step, "target_unit" in step
+        # Existing canonical IDENTITY metadata may omit both units. An
+        # explicit conversion must carry both of its original declarations.
+        if not has_input and not has_target and rule == "IDENTITY":
+            continue
+        if not has_input or not has_target or step["target_unit"] != target:
+            reject("missing or conflicting target unit for field semantics")
+        # Missing data is never converted. The normalizer preserves its raw
+        # unit declaration even when it emits IDENTITY for a null value.
+        if rule == "IDENTITY" and row.get(field) is None:
+            continue
+        unit = step["input_unit"]
+        unit = unit.strip().lower() if isinstance(unit, str) else None
+        allowed_units = ({"股", "share", "shares"} if target == "股" else {"元", "yuan", "cny"})
+        if rule == "LOT100_TO_SHARE":
+            allowed_units = {"手", "lot", "lots"}
+        elif rule == "TEN_THOUSAND_YUAN_TO_YUAN":
+            allowed_units = {"万元", "万人民币", "10k yuan"}
+        if unit not in allowed_units:
+            reject("input unit conflicts with conversion rule and field semantics")

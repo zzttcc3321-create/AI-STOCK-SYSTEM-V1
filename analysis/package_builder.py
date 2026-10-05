@@ -149,6 +149,12 @@ def _validate_market(row: dict[str, Any], kind: str, stock_id: str) -> tuple[str
                 raise AnalysisInputError("canonical persistence id must be a scalar identifier")
         else:
             _timestamp(row[name])
+    # Validate original provenance before wrapping canonical values as
+    # IDENTITY/VERIFIED for numeric checks. Never rewrite the conversion chain.
+    try:
+        validate_metadata(row, kind)
+    except ValueError as exc:
+        raise AnalysisInputError(str(exc)) from None
     names = ("open", "high", "low", "close", "volume", "amount") if kind == "daily_kline" else ("price", "bid", "ask", "volume", "amount")
     numeric = {}
     for name in names:
@@ -185,10 +191,6 @@ def _validate_market(row: dict[str, Any], kind: str, stock_id: str) -> tuple[str
     ranks = {"PASS": 0, "WARNING": 1, "UNVERIFIED": 2}
     if ranks[row["data_quality_status"]] < ranks[result.status.value]:
         raise AnalysisInputError("canonical quality status hides a validation warning")
-    try:
-        validate_metadata(row, kind)
-    except ValueError as exc:
-        raise AnalysisInputError(str(exc)) from None
     return result.warnings
 
 
