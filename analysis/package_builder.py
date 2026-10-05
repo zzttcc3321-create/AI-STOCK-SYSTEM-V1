@@ -286,7 +286,7 @@ class AnalysisPackageBuilder:
         if "holding_snapshot" in links:
             raise AnalysisInputError("holding_snapshot cannot reference Provider Evidence")
         evidence = _evidence_index(evidence_metadata)
-        used, addressed = set(), set()
+        addressed = set()
         missing = _text_set(missing_fields, "missing_fields")
         reported_missing = set(missing)
         stale = _text_set(stale_fields, "stale_fields")
@@ -415,7 +415,6 @@ class AnalysisPackageBuilder:
                 historical_identity(row, identifiers)
             elif historical_gate(row, path, identifiers, matched) is not None:
                 return None
-            used.update(identifiers)
             entry = {"data": row, "evidence_ids": identifiers}
             if path.startswith("market_quotes.") and judgment_cutoff is not None:
                 assessment = _quote_freshness_at_cutoff({**row, "knowability": collection_times}, judgment_cutoff)
@@ -623,6 +622,10 @@ class AnalysisPackageBuilder:
         # while evidenced historical analysis remains usable.
         if not quality["complete_analysis_input"]:
             quality["package_status"] = "INCOMPLETE"
+        # Only final retained business records grant citation rights. Audit
+        # links remain intact; shared Evidence survives if any record retains it.
+        used = {identifier for block in (identity_block, *blocks.values(), *information.values())
+                for entry in block["records"] for identifier in entry["evidence_ids"]}
         package = AnalysisPackage(
             stock_id=stock_id, position_mode="WATCH_ONLY" if holding_snapshot is None else "HOLDING_ANALYSIS",
             stock_identity=identity_block, holding_snapshot=holding_block,
