@@ -117,7 +117,10 @@ class AnalysisRunEvidenceTests(unittest.TestCase):
 
     def test_status_cannot_be_supplied_or_changed(self):
         evidence = self.build()
-        with self.assertRaises(ValueError): replace(evidence, human_confirm="CONFIRMED")
+        # Python 3.14 rejects dataclasses.replace() updates to init=False fields
+        # with TypeError; earlier supported versions used ValueError.
+        with self.assertRaises((TypeError, ValueError)):
+            replace(evidence, human_confirm="CONFIRMED")
         with self.assertRaises(FrozenInstanceError): evidence.human_confirm = "CONFIRMED"
 
     def test_json_snapshot_detached_from_record(self):

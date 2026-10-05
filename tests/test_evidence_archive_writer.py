@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from dataclasses import replace
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 from evidence import ArchiveWriter, ArchiveReader, ArchiveIdentity, ArchiveError
 from evidence.archive_contracts import MAX_RAW_BYTES, SIDECAR_NAME, sha256, plain
+from windows_compat import marked_reparse_point, symlink_privilege_missing
 
 AT = '2026-10-04T08:00:00+08:00'
 ID = ArchiveIdentity('run', 'collection', 'request', 'evidence')
@@ -117,6 +119,11 @@ class ArchiveWriterTests(unittest.TestCase):
                 with self.assertRaises(OSError):
                     write(self.writer)
             self.assertFalse(self.writer.resolver.resolve(ID.uri).exists())
+        self.root.mkdir(exist_ok=True)
+        with patch('evidence.archive_writer.os.name', 'nt'), \
+                patch('evidence.archive_writer.os.open') as opened:
+            self.writer._sync_dir(self.root)
+        opened.assert_not_called()
 
     def test_post_rename_fsync_leaves_only_uncommitted_orphan(self):
         original = self.writer._sync_dir
@@ -149,13 +156,29 @@ class ArchiveWriterTests(unittest.TestCase):
     def test_symlink_root_or_component_rejected(self):
         outside = Path(self.temp.name) / 'outside'
         outside.mkdir()
-        self.root.symlink_to(outside, target_is_directory=True)
-        with self.assertRaisesRegex(ArchiveError, 'SYMLINK_ESCAPE'):
-            ArchiveWriter(self.root)
-        self.root.unlink()
+        try:
+            self.root.symlink_to(outside, target_is_directory=True)
+            with self.assertRaisesRegex(ArchiveError, 'SYMLINK_ESCAPE'):
+                ArchiveWriter(self.root)
+            self.root.unlink()
+        except OSError as exc:
+            if not symlink_privilege_missing(exc):
+                raise
+            self.root.mkdir()
+            with marked_reparse_point(self.root), self.assertRaisesRegex(ArchiveError, 'SYMLINK_ESCAPE'):
+                ArchiveWriter(self.root)
+            self.root.rmdir()
         (self.root / 'v1').mkdir(parents=True)
-        (self.root / 'v1' / 'run').symlink_to(outside, target_is_directory=True)
-        with self.assertRaisesRegex(ArchiveError, 'SYMLINK_ESCAPE'):
+        link = self.root / 'v1' / 'run'
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+            context = nullcontext()
+        except OSError as exc:
+            if not symlink_privilege_missing(exc):
+                raise
+            link.mkdir()
+            context = marked_reparse_point(link)
+        with context, self.assertRaisesRegex(ArchiveError, 'SYMLINK_ESCAPE'):
             write(self.writer)
         self.assertFalse(list(outside.iterdir()))
 

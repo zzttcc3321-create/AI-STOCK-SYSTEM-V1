@@ -7,6 +7,7 @@ class ArchiveContractTests(unittest.TestCase):
     def test_uri_exact(self):
         identity = ArchiveIdentity('run', 'collection', 'request', 'evidence')
         self.assertEqual(identity.uri, 'archive://v1/run/collection/request/evidence')
+        self.assertNotIn('\\', identity.uri)
         self.assertEqual(ArchiveIdentity.parse(identity.uri), identity)
 
     def test_bad_uri_and_traversal(self):

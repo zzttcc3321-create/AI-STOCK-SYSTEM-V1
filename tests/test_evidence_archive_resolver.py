@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import stat
@@ -7,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from evidence import ArchiveError, ArchiveIdentity, ArchiveResolver
+from windows_compat import marked_reparse_point, symlink_privilege_missing
 
 
 class ArchiveResolverTests(unittest.TestCase):
@@ -18,18 +20,35 @@ class ArchiveResolverTests(unittest.TestCase):
         self.target.mkdir(parents=True)
         self.link = self.base / 'link'
 
+    def symlink(self):
+        try:
+            self.link.symlink_to(self.target, target_is_directory=True)
+            return True
+        except OSError as exc:
+            if not symlink_privilege_missing(exc):
+                raise
+            self.link.mkdir()
+            return False
+
     def test_symlink_root_rejected(self):
-        self.link.symlink_to(self.target, target_is_directory=True)
-        with self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
+        linked = self.symlink()
+        context = marked_reparse_point(self.link) if not linked else nullcontext()
+        with context, self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
             ArchiveResolver(self.link)
 
     def test_symlink_intermediate_component_rejected(self):
-        self.link.symlink_to(self.target, target_is_directory=True)
-        with self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
+        linked = self.symlink()
+        context = marked_reparse_point(self.link) if not linked else nullcontext()
+        with context, self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
             ArchiveResolver(self.link / 'archive')
 
     def test_symlink_before_parent_traversal_rejected(self):
-        self.link.symlink_to(self.target, target_is_directory=True)
+        linked = self.symlink()
+        if not linked:
+            with marked_reparse_point(self.link), \
+                    self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
+                ArchiveResolver(self.link / '..' / 'archive')
+            return
         (self.base / 'archive').mkdir()
         (self.target.parent / 'archive').mkdir()
         absolute = self.link / '..' / 'archive'
@@ -65,7 +84,15 @@ class ArchiveResolverTests(unittest.TestCase):
     def test_resolve_still_rejects_symlink_added_after_initialization(self):
         resolver = ArchiveResolver(self.base / 'archive')
         (resolver.root / 'v1').mkdir(parents=True)
-        (resolver.root / 'v1' / 'run').symlink_to(self.target, target_is_directory=True)
+        link = resolver.root / 'v1' / 'run'
+        try:
+            link.symlink_to(self.target, target_is_directory=True)
+            context = nullcontext()
+        except OSError as exc:
+            if not symlink_privilege_missing(exc):
+                raise
+            link.mkdir()
+            context = marked_reparse_point(link)
         identity = ArchiveIdentity('run', 'collection', 'request', 'evidence')
-        with self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
+        with context, self.assertRaisesRegex(ArchiveError, '^SYMLINK_ESCAPE_REJECTED$'):
             resolver.resolve(identity.uri)
