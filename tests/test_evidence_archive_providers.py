@@ -13,12 +13,14 @@ from test_tushare_provider import bar
 from test_tdx_realtime import FakeLocal
 from providers.tdx_information import MCPResponse
 from test_tdx_information import MockTransport, query, TEST_ENV, Clock
+from windows_compat import use_simulated_directory_fsync
 
 
 class ArchiveProviderTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        use_simulated_directory_fsync(self)
         self.root = Path(self.temp.name) / 'archive'
         self.writer = ArchiveWriter(self.root)
         self.context = dict(system_run_id='run', collection_task_id='collection', request_id='request', evidence_id='evidence')

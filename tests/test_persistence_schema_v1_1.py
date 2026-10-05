@@ -423,7 +423,7 @@ class ResumeSchemaTests(unittest.TestCase):
         changed=subprocess.check_output(['git','diff',IMPLEMENTATION_BASELINE,
             '00ecb1518daa9d7bf63b53712ace9cb2b076af7f','--name-only']).decode().splitlines()
         self.assertTrue(set(changed)<=IMPLEMENTATION_WHITELIST,changed)
-        self.assertEqual({str(p) for p in Path('migration').glob('*.sql')},
+        self.assertEqual({p.as_posix() for p in Path('migration').glob('*.sql')},
                          {'migration/003_db_schema_v1_1_additive.sql'})
         for path in ('persistence/schema_v1_1.py','docs/frozen/DB_SCHEMA_V1.1.md'):
             self.assertEqual(Path(path).read_bytes(),subprocess.check_output(

@@ -8,12 +8,14 @@ import unittest
 from evidence import ArchiveWriter, ArchiveReader, ArchiveError
 from evidence.archive_contracts import (SIDECAR_NAME, canonical_json, sealed, sha256)
 from test_evidence_archive_writer import write, ID
+from windows_compat import marked_reparse_point, symlink_privilege_missing, use_simulated_directory_fsync
 
 
 class ArchiveReaderTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        use_simulated_directory_fsync(self)
         self.writer = ArchiveWriter(Path(self.temp.name) / 'archive')
         self.reader = self.writer.reader
         self.receipt = write(self.writer)
@@ -97,10 +99,19 @@ class ArchiveReaderTests(unittest.TestCase):
         for target in (self.raw, self.sidecar):
             original = target.read_bytes()
             outside = Path(self.temp.name) / 'outside'; outside.write_bytes(original)
-            target.unlink(); target.symlink_to(outside)
-            with self.subTest(target=target.name), self.assertRaisesRegex(ArchiveError, 'SYMLINK_ESCAPE'):
-                self.reader.read(ID.uri)
-            target.unlink(); target.write_bytes(original)
+            target.unlink()
+            try:
+                target.symlink_to(outside)
+                with self.subTest(target=target.name), self.assertRaisesRegex(ArchiveError, 'SYMLINK_ESCAPE'):
+                    self.reader.read(ID.uri)
+                target.unlink(); target.write_bytes(original)
+            except OSError as exc:
+                if not symlink_privilege_missing(exc):
+                    raise
+                target.write_bytes(original)
+                with marked_reparse_point(target), self.subTest(target=target.name), \
+                        self.assertRaisesRegex(ArchiveError, 'SYMLINK_ESCAPE'):
+                    self.reader.read(ID.uri)
 
     def test_metadata_identity_mismatch_even_after_hash_recomputed(self):
         for key in ('system_run_id', 'collection_task_id', 'request_id', 'evidence_id'):
