@@ -5,7 +5,7 @@ from dataclasses import replace
 import json
 import unittest
 
-from analysis import AnalysisPackageBuilder
+from analysis import AnalysisInputError, AnalysisPackageBuilder
 from analysis.prompt_builder import PromptBuilder
 from evidence import EvidenceBuilder, sha256_digest
 from normalizer import DataNormalizer
@@ -25,14 +25,18 @@ def quote_input(**changes):
         ProviderStatus.AVAILABLE, REQUEST, None, "run/task/request/raw.json", quote, None)
 
 
-def package_for(envelope, result):
-    evidence = EvidenceBuilder().build(fetch_result=envelope, endpoint_or_tool="offline_quote",
+def quote_evidence(envelope, result):
+    return EvidenceBuilder().build(fetch_result=envelope, endpoint_or_tool="offline_quote",
         request_params={"stock_id": STOCK}, collection_task_id="task", system_run_id="run",
         normalization_result=result, evidence_id="EV-QUOTE")
+
+
+def package_for(envelope, result, *, evidence=None, **context):
+    evidence = evidence or quote_evidence(envelope, result)
     arguments = package_arguments(quote=True)
     arguments["canonical_data"]["market_quotes"] = result.canonical_data
     arguments["evidence_metadata"][-1] = evidence
-    return AnalysisPackageBuilder().build(**arguments), evidence
+    return AnalysisPackageBuilder().build(**arguments, **context), evidence
 
 
 class QuoteFreshnessTests(unittest.TestCase):
@@ -178,6 +182,135 @@ class QuoteFreshnessTests(unittest.TestCase):
         for state in ("UNKNOWN", "STALE"):
             with self.subTest(state=state):
                 self.assert_state(quote_input(freshness=state), state, "DECLARED_" + state)
+
+    def test_builder_rechecks_acquisition_freshness_at_analysis_cutoff(self):
+        envelope = quote_input(quote_timestamp="2026-09-30T16:55:50Z",
+                               disclosure_time="2026-09-30T16:55:50Z")
+        result = self.normalize(envelope, acquired_at="2026-09-30T17:00:01Z")
+        before = deepcopy(result)
+        row = result.canonical_data[0]
+        self.assertEqual(row["freshness"], "REALTIME")
+        self.assertEqual(row["freshness_check"]["age_seconds"], 251)
+        cutoff = "2026-09-30T17:01:00Z"
+        evidence = quote_evidence(envelope, result)
+        evidence_before = replace(evidence)
+        package, _ = package_for(envelope, result, evidence=evidence, judgment_cutoff=cutoff)
+        self.assertEqual(package.data_quality["REALTIME_QUOTE_STATUS"], "MISSING")
+        assessment = package.latest_quote["records"][0]["freshness_at_cutoff"]
+        control = self.normalize(envelope, acquired_at="2026-09-30T17:00:01Z",
+                                 judgment_cutoff=cutoff).canonical_data[0]
+        self.assertEqual(assessment["freshness"], control["freshness"])
+        self.assertEqual(assessment["freshness"], "STALE")
+        self.assertEqual(assessment["freshness_check"]["age_seconds"], 310)
+        self.assertEqual(assessment["freshness_check"]["reference_time"], cutoff)
+        self.assertIn("STALE_QUOTE_TIMESTAMP", assessment["freshness_check"]["reason_codes"])
+        self.assertEqual(package.latest_quote["status"], "WARNING")
+        inputs = PromptBuilder().inputs(package)
+        self.assertEqual(inputs["data_quality_report"]["REALTIME_QUOTE_STATUS"], "MISSING")
+        self.assertIn("market_quotes.0", inputs["data_quality_report"]["stale_fields"])
+        self.assertTrue(any("STALE_QUOTE_TIMESTAMP" in warning for warning in
+                            inputs["data_quality_report"]["validation_warnings"]))
+        # Collection facts remain exactly as sealed; analysis assessment is separate.
+        self.assertEqual(inputs["canonical_market_data"]["market_quotes"]["records"][0]
+                         ["data"]["freshness_check"], json.loads(json.dumps(row["freshness_check"])))
+        self.assertEqual(result, before)
+        self.assertEqual(evidence, evidence_before)
+        self.assertEqual(evidence.normalized_data_hash, sha256_digest(result.canonical_data))
+        current, same_evidence = package_for(envelope, result)
+        self.assertEqual(current.data_quality["REALTIME_QUOTE_STATUS"], "PASS")
+        self.assertEqual(same_evidence, evidence)
+
+    def test_builder_cutoff_freshness_boundary_and_timezone_controls(self):
+        envelope = quote_input(quote_timestamp="2026-09-30T16:55:50Z",
+                               disclosure_time="2026-09-30T16:55:50Z")
+        result = self.normalize(envelope, acquired_at="2026-09-30T17:00:01Z")
+        for cutoff, age, state in (
+                ("2026-09-30T17:00:49Z", 299, "REALTIME"),
+                ("2026-09-30T17:00:50Z", 300, "REALTIME"),
+                ("2026-10-01T01:00:50+08:00", 300, "REALTIME"),
+                ("2026-09-30T17:00:50.000001Z", 300.000001, "STALE")):
+            with self.subTest(cutoff=cutoff):
+                package, _ = package_for(envelope, result, judgment_cutoff=cutoff)
+                assessment = package.latest_quote["records"][0]["freshness_at_cutoff"]
+                self.assertEqual(assessment["freshness"], state)
+                self.assertEqual(assessment["freshness_check"]["age_seconds"], age)
+                self.assertEqual(package.data_quality["REALTIME_QUOTE_STATUS"],
+                                 "PASS" if state == "REALTIME" else "MISSING")
+
+    def test_builder_without_cutoff_keeps_collection_freshness(self):
+        result = self.normalize(acquired_at="2026-09-30T17:00:01Z")
+        package, _ = package_for(quote_input(), result)
+        entry = package.latest_quote["records"][0]
+        self.assertNotIn("freshness_at_cutoff", entry)
+        self.assertEqual(entry["data"]["freshness_check"]["reference_time"],
+                         "2026-09-30T17:00:01Z")
+        self.assertEqual(package.data_quality["REALTIME_QUOTE_STATUS"], "PASS")
+
+    def test_builder_rechecks_with_cutoff_inferred_from_other_record(self):
+        envelope = quote_input(quote_timestamp="2026-09-30T16:55:50Z",
+                               disclosure_time="2026-09-30T16:55:50Z")
+        result = self.normalize(envelope, acquired_at="2026-09-30T17:00:01Z")
+        arguments = package_arguments(quote=True)
+        arguments["canonical_data"]["market_quotes"] = result.canonical_data
+        times = deepcopy(result.canonical_data[0]["knowability"])
+        times["data_period"]["value"] = "2026-09-30"
+        times["judgment_cutoff"].update(value="2026-09-30T17:01:00Z", status="VERIFIED")
+        arguments["canonical_data"]["daily_kline"][0]["knowability"] = times
+        package = AnalysisPackageBuilder().build(**arguments)
+        self.assertEqual(package.data_quality["REALTIME_QUOTE_STATUS"], "MISSING")
+        self.assertEqual(package.latest_quote["records"][0]["freshness_at_cutoff"]
+                         ["freshness_check"]["age_seconds"], 310)
+
+    def test_builder_rejects_missing_or_conflicting_freshness_basis_at_cutoff(self):
+        envelope = quote_input(disclosure_time=FRESH)
+        result = self.normalize(envelope, acquired_at="2026-09-30T17:00:01Z")
+        for field, value in ((None, None), ("freshness_check", None), ("freshness_check", []),
+                             ("freshness_check", {}), ("quote_timestamp", REQUEST),
+                             ("request_timestamp", "2026-09-30T16:59:59Z"),
+                             ("acquired_at", "2026-09-30T17:00:02Z"),
+                             ("judgment_cutoff", "2026-09-30T17:00:02Z"),
+                             ("age_seconds", 0), ("stale_after_seconds", 600),
+                             ("contract_version", "UNSUPPORTED")):
+            with self.subTest(field=field):
+                altered = deepcopy(result)
+                row = altered.canonical_data[0]
+                if field is None:
+                    del row["freshness_check"]
+                elif field == "freshness_check":
+                    row[field] = value
+                else:
+                    row["freshness_check"][field] = value
+                with self.assertRaises(AnalysisInputError):
+                    package_for(envelope, altered, judgment_cutoff="2026-09-30T17:01:00Z")
+
+    def test_builder_rejects_evidence_request_clock_conflict_at_cutoff(self):
+        envelope = quote_input(disclosure_time=FRESH)
+        result = self.normalize(envelope, acquired_at="2026-09-30T17:00:01Z")
+        evidence = replace(quote_evidence(envelope, result),
+                           request_timestamp="2026-09-30T16:59:59Z")
+        with self.assertRaises(AnalysisInputError):
+            package_for(envelope, result, evidence=evidence, judgment_cutoff="2026-09-30T17:01:00Z")
+
+    def test_builder_request_context_restriction_is_recomputed(self):
+        envelope = quote_input(disclosure_time=FRESH)
+        result = self.normalize(envelope, acquired_at="2026-09-30T17:00:01Z")
+        package, _ = package_for(envelope, result, judgment_cutoff="2026-09-30T17:05:01Z")
+        assessment = package.latest_quote["records"][0]["freshness_at_cutoff"]
+        self.assertEqual(assessment["freshness"], "UNKNOWN")
+        self.assertIn("REQUEST_TIME_MISMATCH", assessment["freshness_check"]["reason_codes"])
+        self.assertEqual(package.data_quality["REALTIME_QUOTE_STATUS"], "MISSING")
+
+    def test_builder_does_not_upgrade_collection_restrictions(self):
+        for changes, acquired in (({"freshness": "STALE"}, "2026-09-30T17:00:01Z"),
+                                  ({"freshness": "UNKNOWN"}, "2026-09-30T17:00:01Z"),
+                                  ({"quote_timestamp": "2026-09-30T17:00:01Z"}, REQUEST)):
+            with self.subTest(changes=changes):
+                envelope = quote_input(disclosure_time=FRESH, **changes)
+                result = self.normalize(envelope, acquired_at=acquired)
+                package, _ = package_for(envelope, result, judgment_cutoff="2026-09-30T17:01:00Z")
+                self.assertEqual(package.data_quality["REALTIME_QUOTE_STATUS"], "MISSING")
+                self.assertNotEqual(package.latest_quote["records"][0]
+                                    ["freshness_at_cutoff"]["freshness"], "REALTIME")
 
 
 if __name__ == "__main__":

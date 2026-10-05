@@ -9,7 +9,8 @@ from typing import Any, Mapping, Sequence
 from evidence.contracts import EvidenceRecord
 from evidence.contracts import TimeFact
 from evidence.knowability import aware_clock, cutoff_reasons, time_facts, validate_times
-from normalizer.contracts import ConversionRule, NumericField, UnitStatus
+from normalizer.contracts import ConversionRule, FreshnessCheck, NumericField, UnitStatus
+from normalizer.normalizer import evaluate_quote_freshness
 from normalizer.semantics import RULE_VERSION, SEMANTIC_FIELDS, validate_metadata
 from normalizer.validation import parse_trade_date, validate_daily, validate_quote
 from normalizer.information import validate_information_evidence, validate_information_result
@@ -176,6 +177,8 @@ def _validate_market(row: dict[str, Any], kind: str, stock_id: str) -> tuple[str
             raise AnalysisInputError("invalid canonical freshness")
         if row["quote_timestamp"] is None and row["freshness"] != "UNKNOWN":
             raise AnalysisInputError("missing quote clock requires UNKNOWN freshness")
+        if "freshness_check" in row and not isinstance(row["freshness_check"], Mapping):
+            raise AnalysisInputError("quote freshness basis must be a canonical mapping")
         result = validate_quote(row, numeric)
     if not result.passed:
         raise AnalysisInputError("canonical market hard validation failed")
@@ -189,9 +192,50 @@ def _validate_market(row: dict[str, Any], kind: str, stock_id: str) -> tuple[str
     return result.warnings
 
 
+def _quote_freshness_at_cutoff(row: dict[str, Any], cutoff: str) -> dict[str, Any]:
+    """Assess analysis context separately from the Evidence's collection facts."""
+    check = row.get("freshness_check")
+    if not isinstance(check, Mapping) or set(check) != set(FreshnessCheck.__dataclass_fields__):
+        raise AnalysisInputError("analysis cutoff requires a complete quote freshness basis")
+    try:
+        _timestamp(check["request_timestamp"])
+        _, original_state, original_check = evaluate_quote_freshness(
+            check["quote_timestamp"], check["timestamp_source"], check["declared_freshness"],
+            check["request_timestamp"], check["acquired_at"], check["judgment_cutoff"])
+        times = row.get("knowability")
+
+        def same_clock(left, right):
+            if left is None or right is None:
+                return left is right
+            return aware_clock(left) == aware_clock(right)
+
+        if (safe_json(original_check) != check or original_state != row["freshness"]
+                or not same_clock(check["quote_timestamp"], row["quote_timestamp"])
+                or "request_timestamp" in row and not same_clock(check["request_timestamp"], row["request_timestamp"])
+                or check["timestamp_source"] not in {"provider.row.quote_timestamp", "envelope.provider_timestamp"}
+                or any(not same_clock(check[name], times[name]["value"] if times else None)
+                       for name in ("acquired_at", "judgment_cutoff"))):
+            raise ValueError("quote freshness basis conflicts with canonical clocks or state")
+        _, state, assessed = evaluate_quote_freshness(
+            row["quote_timestamp"], check["timestamp_source"], check["declared_freshness"],
+            check["request_timestamp"], check["acquired_at"], cutoff)
+    except (ValueError, TypeError) as exc:
+        raise AnalysisInputError(str(exc)) from None
+    # Rechecking must not upgrade a restriction already sealed at collection.
+    if state == "REALTIME" and row["freshness"] != "REALTIME":
+        state = row["freshness"]
+    status = row["data_quality_status"]
+    if assessed["reason_codes"] and status == "PASS":
+        status = "WARNING"
+    return {"freshness": state, "freshness_check": safe_json(assessed),
+            "data_quality_status": status}
+
+
 def _block(records: list[dict[str, Any]], *, reason: str | None = None,
            absent_status: str = "MISSING") -> dict[str, Any]:
     statuses = {entry["data"].get("data_quality_status", "PASS") for entry in records}
+    statuses.update(entry["freshness_at_cutoff"]["data_quality_status"]
+                    for entry in records if "freshness_at_cutoff" in entry)
     status = "UNVERIFIED" if "UNVERIFIED" in statuses else "WARNING" if "WARNING" in statuses else "PASS"
     return {"status": status if records else absent_status, "records": records, "reason": reason,
             "aggregation_rule": "WORST_RECORD_QUALITY: UNVERIFIED > WARNING > PASS; EMPTY_USES_ABSENT_STATUS"}
@@ -342,6 +386,7 @@ class AnalysisPackageBuilder:
         def attach(row: dict[str, Any], path: str, source: str | None = None,
                    *, information_result: Any = None) -> dict[str, Any] | None:
             record_status = row.get("data_quality_status")
+            collection_times = row.get("knowability")
             addressed.add(path)
             identifiers = _sequence(links.get(path, []), "evidence links")
             for identifier in identifiers:
@@ -372,6 +417,16 @@ class AnalysisPackageBuilder:
                 return None
             used.update(identifiers)
             entry = {"data": row, "evidence_ids": identifiers}
+            if path.startswith("market_quotes.") and judgment_cutoff is not None:
+                assessment = _quote_freshness_at_cutoff({**row, "knowability": collection_times}, judgment_cutoff)
+                if any(aware_clock(item["request_timestamp"]) != aware_clock(row["freshness_check"]["request_timestamp"])
+                       for item in matched):
+                    raise AnalysisInputError("quote freshness request clock conflicts with Evidence")
+                entry["freshness_at_cutoff"] = assessment
+                if assessment["freshness"] != "REALTIME":
+                    stale.add(path)
+                warnings.update(f"{path}: quote freshness restriction: {reason}"
+                                for reason in assessment["freshness_check"]["reason_codes"])
             if path == "stock_identity" and judgment_cutoff is not None:
                 entry["identity_scope"] = "LOOKUP_KEY_ONLY"
             return entry
