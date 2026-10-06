@@ -124,7 +124,9 @@ class EvidenceBuilder:
                 raise ValueError("successful/PARTIAL fetch requires raw_response_path")
             if raw_path:
                 expected_prefix = f"{system_run_id}/{collection_task_id}/"
-                normalized_path = raw_path.removeprefix("file://").lstrip("/")
+                # Compare context IDs independently of the host path separator;
+                # retain the original reference in the evidence record.
+                normalized_path = raw_path.removeprefix("file://").replace("\\", "/").lstrip("/")
                 if expected_prefix not in normalized_path:
                     raise ValueError("raw_response_path must contain system_run_id/collection_task_id/request_id")
             normalized = _get(normalization_result, "canonical_data") if normalization_result is not None else None

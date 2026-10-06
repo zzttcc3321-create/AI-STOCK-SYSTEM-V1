@@ -16,6 +16,7 @@ from providers.tdx_information import (
     ACTUAL_PROVIDER_SERVICE, ENDPOINT, LOGICAL_SOURCE, MAX_BODY_BYTES,
     MCPHTTPTransport, MCPResponse, NoRedirect, TOOL_KINDS,
 )
+from windows_compat import use_simulated_directory_fsync
 
 # TEST_KEY_ONLY: deliberately synthetic; never read a real key in this suite.
 TEST_ENV = {"TDX_MCP_API_KEY": "TEST_KEY_ONLY"}
@@ -106,6 +107,7 @@ class ProviderTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        use_simulated_directory_fsync(self)
         self.root = Path(self.temporary.name)
         self.transport = MockTransport()
         self.clock = Clock()
@@ -760,6 +762,7 @@ class ResponseNormalizationTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
+        use_simulated_directory_fsync(self)
         self.root = Path(temporary.name)
         self.transport = MockTransport()
 

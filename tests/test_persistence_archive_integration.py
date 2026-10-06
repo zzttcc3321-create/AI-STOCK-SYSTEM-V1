@@ -206,7 +206,11 @@ class PersistenceArchiveIntegrationTests(unittest.TestCase):
 
     def test_absolute_raw_paths_rejected_even_for_synthetic_projection(self):
         record = source_records(self.flow.run_evidence)[0]
-        for path in ('/tmp/synthetic-raw.json', 'C:\\synthetic\\raw.json', '\\\\synthetic\\share\\raw.json'):
+        # A POSIX rooted path is drive-relative on Windows. Build a native
+        # absolute fixture while retaining explicit drive and UNC coverage.
+        native_absolute = str(Path(self.temp.name).resolve() / 'synthetic-raw.json')
+        self.assertTrue(Path(native_absolute).is_absolute())
+        for path in (native_absolute, 'C:\\synthetic\\raw.json', '\\\\synthetic\\share\\raw.json'):
             with self.subTest(path=path), self.assertRaisesRegex(PersistenceError, 'ABSOLUTE_RAW_PATH_FORBIDDEN'):
                 evidence_row(replace(record, raw_response_path=path), STAMP)
 

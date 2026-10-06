@@ -77,13 +77,30 @@ class EvidenceBuilderTests(unittest.TestCase):
             record.request_params["range"]["start"] = "changed"
 
     def test_write_failure_is_not_silent(self):
-        builder = EvidenceBuilder()
-        with self.assertRaises(ValueError):
-            builder.build(
-                fetch_result=fetched(raw_path="wrong/path.json"), endpoint_or_tool="daily",
-                request_params={}, collection_task_id=TASK, system_run_id=RUN,
-            )
-        self.assertEqual(builder.missing_events[0].collection_task_id, TASK)
+        # Windows separators affect comparison only; preserve byte-for-byte
+        # references and continue rejecting mismatched run/task context IDs.
+        for path in (PATH, f"C:\\evidence\\{RUN}\\{TASK}\\request-abc\\response.json",
+                     f"\\\\server\\share\\{RUN}\\{TASK}\\request-abc\\response.json",
+                     f"C:\\evidence/{RUN}\\{TASK}/request-abc/response.json",
+                     f"file:///C:/evidence/{RUN}/{TASK}/request-abc/response.json"):
+            with self.subTest(path=path):
+                record = EvidenceBuilder().build(
+                    fetch_result=fetched(raw_path=path), endpoint_or_tool="daily",
+                    request_params={}, collection_task_id=TASK, system_run_id=RUN,
+                )
+                self.assertEqual(record.raw_response_path, path)
+                self.assertEqual(record.raw_response_hash, built().raw_response_hash)
+        for path in ("wrong/path.json", f"C:\\evidence\\wrong-run\\{TASK}\\response.json",
+                     f"C:\\evidence\\{RUN}\\wrong-task\\response.json",
+                     f"\\\\server\\share\\{RUN}\\wrong-task\\response.json"):
+            with self.subTest(path=path):
+                builder = EvidenceBuilder()
+                with self.assertRaisesRegex(ValueError, "raw_response_path must contain"):
+                    builder.build(
+                        fetch_result=fetched(raw_path=path), endpoint_or_tool="daily",
+                        request_params={}, collection_task_id=TASK, system_run_id=RUN,
+                    )
+                self.assertEqual(builder.missing_events[0].collection_task_id, TASK)
 
     def test_record_is_immutable_and_correction_supersedes(self):
         original = built()
