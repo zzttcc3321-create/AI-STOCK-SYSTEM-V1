@@ -35,7 +35,7 @@ class ArchiveReader:
                 for entry in entries:
                     require(not entry.is_symlink(), "SYMLINK_ESCAPE_REJECTED")
                     require(entry.is_file(follow_symlinks=False) and (entry.name in allowed or
-                            re.fullmatch(r"(?:normalized|binding)-[a-f0-9]{64}\.json", entry.name)),
+                            re.fullmatch(r"(?:normalized|binding|evidence)-[a-f0-9]{64}\.json", entry.name)),
                             "DUPLICATE_OR_UNKNOWN_FILE")
             for p in meta["parts"]:
                 path = self.resolver.file(directory, p["file"])
@@ -71,10 +71,15 @@ class ArchiveReader:
     def verify_record(self, record):
         record = plain(record)
         identity = ArchiveIdentity.parse(record["raw_response_path"])
-        require(all(record[k] == getattr(identity, k) for k in
-                    ("evidence_id", "system_run_id", "collection_task_id")), "ARCHIVE_CONTEXT_MISMATCH")
+        require((record.get("raw_reference_id") or record["evidence_id"]) == identity.evidence_id and
+                all(record[k] == getattr(identity, k) for k in
+                    ("system_run_id", "collection_task_id")), "ARCHIVE_CONTEXT_MISMATCH")
+        if record.get("canonical_id") is not None:
+            require(self.evidence(identity.uri, record["evidence_id"]) == record, "ARCHIVE_RECORD_MISMATCH")
+            return self.read(identity.uri, include_raw=False)["metadata"]
         meta = self.read(identity.uri, expected=identity, include_raw=False)["metadata"]
-        raw_record = meta["record"]
+        raw_record = {"canonical_id": None, "raw_reference_id": None, **meta["record"]}
+        require(record["evidence_id"] == raw_record["evidence_id"], "ARCHIVE_CONTEXT_MISMATCH")
         dynamic = {"normalization_rule", "validation_result", "normalized_data_hash", "analysis_output_hash",
                    "model_version", "human_confirm"}
         require({k: v for k, v in record.items() if k not in dynamic} ==
@@ -110,3 +115,26 @@ class ArchiveReader:
             return value
         except (OSError, KeyError, TypeError):
             raise ArchiveError("ANALYSIS_BINDING_MISSING_OR_CORRUPT") from None
+
+    def evidence(self, uri, evidence_id):
+        """Read an immutable canonical record, independently of the raw URI ID."""
+        from .identity import validate_canonical_record
+        meta = self.read(uri, include_raw=False)["metadata"]
+        try:
+            value = self._metadata(self.resolver.resolve(uri), "evidence-" + json_hash(evidence_id) + ".json")
+            require(value.get("kind") == "CANONICAL_EVIDENCE" and value.get("uri") == uri,
+                    "CANONICAL_RECORD_MISMATCH")
+            record = value["record"]
+            require(record["evidence_id"] == evidence_id, "CANONICAL_RECORD_MISMATCH")
+            validate_canonical_record(record, meta, self.normalized(uri, record["normalized_data_hash"]))
+            predecessor = record["supersedes_evidence_id"]
+            if predecessor is not None:
+                previous = self._metadata(self.resolver.resolve(uri), "evidence-" + json_hash(predecessor) + ".json")
+                require(previous.get("kind") == "CANONICAL_EVIDENCE" and previous.get("uri") == uri,
+                        "CANONICAL_PREDECESSOR_INVALID")
+                validate_canonical_record(previous["record"], meta,
+                                         self.normalized(uri, previous["record"]["normalized_data_hash"]))
+                require(previous["record"]["evidence_id"] == predecessor, "CANONICAL_PREDECESSOR_INVALID")
+            return record
+        except (OSError, KeyError, TypeError):
+            raise ArchiveError("CANONICAL_METADATA_MISSING_OR_CORRUPT") from None

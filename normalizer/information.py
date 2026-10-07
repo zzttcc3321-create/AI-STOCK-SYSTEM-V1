@@ -227,7 +227,9 @@ def validate_information_evidence(result: InformationNormalizationResult, eviden
             or evidence.raw_response_path != p["raw_response_path"]
             or evidence.request_timestamp != p["request_timestamp"]
             or evidence.provider_timestamp != p["provider_timestamp"]
-            or evidence.supersedes_evidence_id != p["source_evidence_id"]
+            or evidence.supersedes_evidence_id != (p["canonical_id"] if p["raw_reference_id"] is not None else p["source_evidence_id"])
+            or (p["raw_reference_id"] is not None and
+                (evidence.canonical_id != evidence.evidence_id or evidence.raw_reference_id != p["raw_reference_id"]))
             or evidence.normalized_data_hash != sha256_digest(result.canonical_data)):
         _reject("information Evidence hash or original binding mismatch")
 
@@ -336,6 +338,8 @@ class InformationNormalizer:
         provenance = {"stock_id": stock, "tool": tool, "view": view,
                       "judgment_cutoff": judgment_cutoff,
                       "source_evidence_id": evidence.evidence_id,
+                      "canonical_id": evidence.canonical_id,
+                      "raw_reference_id": evidence.raw_reference_id,
                       "endpoint_or_tool": evidence.endpoint_or_tool,
                       "request_params": evidence.request_params,
                       "request_timestamp": evidence.request_timestamp,

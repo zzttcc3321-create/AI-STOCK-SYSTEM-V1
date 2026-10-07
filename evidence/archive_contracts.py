@@ -177,12 +177,15 @@ def validate_raw_metadata(metadata, identity):
         total += p["raw_size"]
     require(total <= MAX_RAW_BYTES and metadata["raw_response_hash"] == bundle_hash(parts), "BUNDLE_HASH_MISMATCH")
     record = metadata["record"]
-    require(type(record) is dict and set(record) == {f.name for f in fields(EvidenceRecord)},
+    schema = {f.name for f in fields(EvidenceRecord)}
+    require(type(record) is dict and set(record) in (schema, schema - {"canonical_id", "raw_reference_id"}),
             "ARCHIVE_RECORD_SCHEMA_INVALID")
     require(type(record) is dict and record["source"] == metadata["source"] and
             record["raw_response_hash"] == metadata["raw_response_hash"] and
             record["raw_response_path"] == identity.uri and
-            all(record[k] == getattr(identity, k) for k in ("evidence_id", "system_run_id", "collection_task_id")),
+            (record.get("raw_reference_id") or record["evidence_id"]) == identity.evidence_id and
+            record.get("canonical_id") is None and
+            all(record[k] == getattr(identity, k) for k in ("system_run_id", "collection_task_id")),
             "ARCHIVE_RECORD_MISMATCH")
     require(type(record["request_params"]) is dict and type(record["endpoint_or_tool"]) is str,
             "ARCHIVE_RECORD_SCHEMA_INVALID")

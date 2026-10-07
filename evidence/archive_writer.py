@@ -93,7 +93,7 @@ class ArchiveWriter:
 
     def write(self, *, identity, source, raw_parts, endpoint_or_tool, request_params,
               request_timestamp, provider_timestamp=None, source_reference=None,
-              attributes=None, secrets=()):
+              attributes=None, secrets=(), evidence_id=None):
         require(type(identity) is ArchiveIdentity, "ARCHIVE_IDENTITY_REQUIRED")
         source = source.value if hasattr(source, "value") else source
         params = sanitized(request_params)
@@ -116,7 +116,8 @@ class ArchiveWriter:
                                          request_timestamp=request_timestamp, provider_timestamp=provider_timestamp),
             endpoint_or_tool=endpoint_or_tool, request_params=params,
             collection_task_id=identity.collection_task_id, system_run_id=identity.system_run_id,
-            evidence_id=identity.evidence_id, raw_response_hash=bundle_hash(parts))
+            evidence_id=evidence_id or identity.evidence_id, raw_response_hash=bundle_hash(parts),
+            raw_reference_id=identity.evidence_id if evidence_id is not None else None)
         meta = dict(version="V1.0", kind="RAW", identity=plain(identity), uri=identity.uri, source=source,
                     source_reference=source_reference, record=plain(record), parts=parts,
                     raw_response_hash=bundle_hash(parts), attributes=plain(attributes or {}))
@@ -206,3 +207,17 @@ class ArchiveWriter:
         return self._append(uri, "binding-" + json_hash(binding["analysis_report_id"]) + ".json",
                             dict(kind="ANALYSIS_BINDING", uri=uri, binding=binding,
                                  analysis_output_hash=binding.get("model_output_hash")))
+
+    def append_evidence(self, record):
+        """Append a canonical identity event; never rewrite raw or older records."""
+        from .identity import validate_canonical_record
+        record = plain(record)
+        uri = record["raw_response_path"]
+        meta = self.reader.read(uri, include_raw=False)["metadata"]
+        normalized = self.reader.normalized(uri, record["normalized_data_hash"])
+        validate_canonical_record(record, meta, normalized)
+        predecessor = record["supersedes_evidence_id"]
+        if predecessor is not None:
+            self.reader.evidence(uri, predecessor)
+        payload = {"kind": "CANONICAL_EVIDENCE", "uri": uri, "record": record}
+        return self._append(uri, "evidence-" + json_hash(record["evidence_id"]) + ".json", payload)

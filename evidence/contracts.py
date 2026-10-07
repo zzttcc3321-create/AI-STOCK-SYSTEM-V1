@@ -82,6 +82,8 @@ class EvidenceRecord:
     analysis_output_hash: str | None
     evidence_id: str
     supersedes_evidence_id: str | None = None
+    canonical_id: str | None = None
+    raw_reference_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
