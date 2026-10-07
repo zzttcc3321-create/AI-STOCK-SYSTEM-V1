@@ -1,0 +1,33 @@
+{
+  "baseline": {
+    "tests": 750,
+    "passed": 750,
+    "skipped": 0,
+    "seconds": 395.204
+  },
+  "p0_initial": {
+    "tests": 755,
+    "passed": 755,
+    "skipped": 0,
+    "seconds": 386.104
+  },
+  "final": {
+    "tests": 772,
+    "passed": 769,
+    "skipped": 3,
+    "failed": 0,
+    "errors": 0,
+    "seconds": 348.345,
+    "original_750_passed": 750,
+    "new_tests_passed": 19,
+    "ui_tests_skipped": 3
+  },
+  "targeted": {
+    "information_normalizer": 23,
+    "information_archive_roundtrip": 7,
+    "archive": 63,
+    "indicator": 6,
+    "dashboard_runtime": 6
+  },
+  "tested_code_commit": "25e1e00e315e2470bc571133e4f35e0f02a0c736"
+}
