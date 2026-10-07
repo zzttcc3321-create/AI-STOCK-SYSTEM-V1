@@ -27,3 +27,9 @@ config/production.*
 # OS / editor noise
 .DS_Store
 Thumbs.db
+
+# Python runtime / analysis caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
