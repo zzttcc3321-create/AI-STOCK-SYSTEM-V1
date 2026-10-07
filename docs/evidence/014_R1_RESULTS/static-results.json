@@ -1,0 +1,13 @@
+{
+  "changed_files": 29,
+  "python_ast_parsed": 19,
+  "credential_findings": [],
+  "protected_paths_unchanged": true,
+  "original_main_sha": "5a866554a4e8bfa0069ae2ee26ce8569f64ac298",
+  "isolated_worktree_clean": true,
+  "origin": "https://github.com/zzttcc3321-create/AI-STOCK-SYSTEM-V1.git",
+  "all_tracked_files_scanned": 143,
+  "all_python_ast_parsed": 94,
+  "all_tracked_credential_findings": [],
+  "scan_scope": "known credential/private-key formats and forbidden filenames; not proof of exhaustive secret detection"
+}

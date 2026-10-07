@@ -1,0 +1,134 @@
+{
+  "TASK_ID": "AI-STOCK-V1-E2E-R1-014",
+  "scope": "DEV_SYNTHETIC_ONLY",
+  "real_database_access": 0,
+  "live_model_calls": 0,
+  "live_provider_calls": 0,
+  "E1": "NOT_RUN_WINDOWS_DEFERRED",
+  "E2": "NOT_RUN_WINDOWS_DEFERRED",
+  "E7": "NOT_RUN_WINDOWS_QI_DEFERRED",
+  "E0": {
+    "status": "PASS_DEV_SCOPE",
+    "baseline": "5a866554a4e8bfa0069ae2ee26ce8569f64ac298",
+    "head": "25e1e00e315e2470bc571133e4f35e0f02a0c736",
+    "worktree_clean": true,
+    "protected_paths_unchanged": true,
+    "real_schema_B_old32_digest": "NOT_RUN_WINDOWS_DEFERRED"
+  },
+  "E3": {
+    "status": "PASS_DEV_SCOPE",
+    "cases": [
+      {
+        "tool": "wenda_notice_query",
+        "view": null,
+        "canonical_id": "EV-00001",
+        "raw_reference_id": "abc123",
+        "supersedes_evidence_id": null,
+        "raw_hash": "f7f929eb79eaa8d8300fbef6db5fde92b20fca9a059c2f127d9d96bbcf65859a",
+        "normalized_hash": "170334d551c9a4909fe51bb5c11df62e66843f910c963d3baa05c2f62112027b"
+      },
+      {
+        "tool": "wenda_news_query",
+        "view": null,
+        "canonical_id": "EV-1",
+        "raw_reference_id": "raw1",
+        "supersedes_evidence_id": null,
+        "raw_hash": "8f6575b1823ca4162ddad4f82a2f2ae6823fec6bace708d346e48780bf07bbbf",
+        "normalized_hash": "66cfcbe15c5b334ab47286128ee858b4ef3acecb8139dc50507431aa31e146ef"
+      },
+      {
+        "tool": "wenda_report_query",
+        "view": null,
+        "canonical_id": "EV-2",
+        "raw_reference_id": "raw2",
+        "supersedes_evidence_id": null,
+        "raw_hash": "ba2805b8412cb95d23cf9b9434b59cda647b97ed8ec2a60c3acdc89d5f04219d",
+        "normalized_hash": "85a2ad454d5b65be2aafa188b80136ccd11a6ee3c70ee3ebff3dcdc6edf4596a"
+      },
+      {
+        "tool": "tdx_api_data",
+        "view": "profit",
+        "canonical_id": "EV-3",
+        "raw_reference_id": "raw3",
+        "supersedes_evidence_id": null,
+        "raw_hash": "eb28cc5526b1e906fbaca854f1b3d36506fb78be51fd3a775cff82ef9b3434ec",
+        "normalized_hash": "b46ae14258e8c164cd97cb6a6792ff5e3e8a436d3fe76ebdb5bb2296250cc31e"
+      },
+      {
+        "tool": "tdx_api_data",
+        "view": "balance",
+        "canonical_id": "EV-4",
+        "raw_reference_id": "raw4",
+        "supersedes_evidence_id": null,
+        "raw_hash": "eb28cc5526b1e906fbaca854f1b3d36506fb78be51fd3a775cff82ef9b3434ec",
+        "normalized_hash": "74f66828084bfaa03ba1b005a2fb415cd392e3fbf3bcf85ded70737df9504642"
+      },
+      {
+        "tool": "tdx_api_data",
+        "view": "cashflow",
+        "canonical_id": "EV-5",
+        "raw_reference_id": "raw5",
+        "supersedes_evidence_id": null,
+        "raw_hash": "eb28cc5526b1e906fbaca854f1b3d36506fb78be51fd3a775cff82ef9b3434ec",
+        "normalized_hash": "1ec0fcd1f494a9726f59adbf3de14ed68807b3dea30d74000df0c6c6a202e08f"
+      }
+    ]
+  },
+  "E4": {
+    "status": "PASS_DEV_SCOPE",
+    "indicators": {
+      "stock_id": "601518.SH",
+      "evidence_id": "EV-DAILY",
+      "canonical_id": "EV-DAILY",
+      "raw_reference_id": "raw-EV-DAILY",
+      "normalized_data_hash": "342f1f8023a5c39c45e8901709544809898ba0353c0d9ee0bbe1683bdaf8fe19",
+      "rule_version": "INDICATORS_V1.0",
+      "as_of": "2026-03-01",
+      "sample_count": 60,
+      "adjustment_basis": "UNADJUSTED",
+      "ma5": 157.0,
+      "ma20": 149.5,
+      "ma60": 129.5,
+      "volume_change": 0.15,
+      "trend": "UP",
+      "DATA_STATUS": "PASS",
+      "limitations": []
+    }
+  },
+  "E5": {
+    "status": "PASS_CODE_CONTRACT",
+    "keys": [
+      "canonical_market_data",
+      "data_quality_report",
+      "evidence_index",
+      "financial_data",
+      "holding_position",
+      "intelligence_data",
+      "stock_id"
+    ],
+    "input_hash": "2a7aa104cd24f04764ef77ab198be9d693ae9d6690a8013d09ebf17cb96678c8",
+    "evidence_count": 1,
+    "DATA_STATUS": "PARTIAL",
+    "holding_position": null
+  },
+  "E6_runtime": {
+    "status": "PASS_DEV_SIMULATION",
+    "history": [
+      "COLLECTING",
+      "NORMALIZING",
+      "READY_FOR_REVIEW",
+      "ARCHIVED"
+    ],
+    "DATA_STATUS": "PARTIAL",
+    "final_snapshot_hash": "0e68865b52290e3bac9f1a9a9aebbd2ee88c88a450fef83158d0ff9fbf8ad083",
+    "confirmation_log_hash": "03995c30a9b3cf74ebb4d2992668cd8eaa3c0940a618a6e223a4bdebbb927e74",
+    "human_actor": "DEV_TEST_REVIEWER",
+    "qi_confirmation": "NOT_RUN"
+  },
+  "synthetic_executor_calls": 1,
+  "E6_UI": {
+    "status": "BLOCKED_WITH_ROOT_CAUSE",
+    "reason": "STREAMLIT_NOT_INSTALLED"
+  },
+  "CONCLUSION": "BLOCKED_WITH_ROOT_CAUSE"
+}
