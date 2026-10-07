@@ -112,6 +112,7 @@ class EvidenceBuilder:
         human_confirm: HumanConfirm = HumanConfirm.PENDING,
         supersedes_evidence_id: str | None = None, evidence_id: str | None = None,
         raw_response_hash: str | None = None,
+        canonical_id: str | None = None, raw_reference_id: str | None = None,
     ) -> EvidenceRecord:
         try:
             if analysis_output is not None and human_confirm is not HumanConfirm.CONFIRMED:
@@ -129,6 +130,20 @@ class EvidenceBuilder:
                 normalized_path = raw_path.removeprefix("file://").replace("\\", "/").lstrip("/")
                 if expected_prefix not in normalized_path:
                     raise ValueError("raw_response_path must contain system_run_id/collection_task_id/request_id")
+            provenance = _get(normalization_result, "provenance", {})
+            raw_reference_id = raw_reference_id or provenance.get("raw_reference_id")
+            if raw_reference_id is None and isinstance(raw_path, str) and raw_path.startswith("archive://"):
+                from .archive_contracts import ArchiveIdentity
+                raw_reference_id = ArchiveIdentity.parse(raw_path).evidence_id
+            record_id = evidence_id or uuid4().hex
+            if normalization_result is not None and raw_reference_id is not None and record_id != raw_reference_id:
+                canonical_id = canonical_id or record_id
+                if provenance.get("raw_reference_id") is not None and provenance.get("canonical_id") is None:
+                    # V1.1 initial canonical events do not supersede raw acquisition.
+                    if supersedes_evidence_id == provenance.get("source_evidence_id"):
+                        supersedes_evidence_id = None
+            if canonical_id is not None and (canonical_id != record_id or canonical_id == raw_reference_id):
+                raise ValueError("canonical Evidence identity must be distinct from raw reference")
             normalized = _get(normalization_result, "canonical_data") if normalization_result is not None else None
             return EvidenceRecord(
                 source=source, endpoint_or_tool=endpoint_or_tool,
@@ -141,7 +156,8 @@ class EvidenceBuilder:
                 raw_response_hash=(raw_response_hash or sha256_digest(_get(fetch_result, "payload"))) if raw_path else None,
                 normalized_data_hash=sha256_digest(normalized) if normalized is not None else None,
                 analysis_output_hash=sha256_digest(analysis_output) if analysis_output is not None else None,
-                evidence_id=evidence_id or uuid4().hex, supersedes_evidence_id=supersedes_evidence_id,
+                evidence_id=record_id, supersedes_evidence_id=supersedes_evidence_id,
+                canonical_id=canonical_id, raw_reference_id=raw_reference_id,
             )
         except Exception as exc:
             self._missing_events.append(EvidenceMissingEvent(collection_task_id, str(exc)))

@@ -1,0 +1,11 @@
+# Evidence Identity Model V1.1 — #014-R1
+
+`evidence_id` identifies one immutable Evidence event. `canonical_id` is that event's canonical identity (equal to evidence_id for canonical events, NULL for raw acquisition). `raw_reference_id` identifies the byte archive, never the canonical event. The final archive URI component retains its historical API name `ArchiveIdentity.evidence_id`, but represents the raw reference only.
+
+New acquisition: `ArchiveWriter.write(identity=ArchiveIdentity(run, task, request, "abc123"), evidence_id="RAW-abc123", ...)`. Initial canonical event: `{evidence_id:"EV-00001", canonical_id:"EV-00001", raw_reference_id:"abc123", supersedes_evidence_id:null}`. Upgrades use a new event ID and supersede the previous canonical event, never the raw ID.
+
+Normalize against the exact source bytes; build the canonical record; append normalized content; call `append_evidence(record)`. Reader `evidence(uri, canonical_id)` loads the immutable canonical sidecar and independently checks raw context, raw hash, normalized hash, rules, validation and predecessor. `verify_record` requires the exact stored canonical event. No reader infers canonical identity from a raw URI.
+
+Legacy V1 raw sidecars remain readable without rewriting them. Legacy records lacking both extension fields follow their original raw-record checks; they are not relabeled as canonical V1.1 records. Existing archive/provider callers can continue acquiring raw data through the old API; New archive acquisitions always populate raw_reference_id; explicit evidence_id lets callers also separate the raw acquisition event from its URI. Builders recognize legacy initial raw supersedes links at the V1.1 boundary and emit NULL for initial canonical events. The SQLite extension lives in the existing Evidence calculation JSON, with no schema/migration changes. DB projections verify the identity extension against the archive before reporting VERIFIED.
+
+All source enums, fail-closed integrity checks, fsync behavior and evidence confirmation semantics remain unchanged. The new sidecar is append-only and create-if-absent, with the same quota, size, sensitive-field and durability gates. No Provider business logic or model-generated missing facts is added.

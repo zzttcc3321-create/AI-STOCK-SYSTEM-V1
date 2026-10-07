@@ -171,10 +171,19 @@ class EvidenceReadRepository:
         if self.archive_reader is not None and type(reference) is str and reference.startswith("archive://"):
             try:
                 identity = ArchiveIdentity.parse(reference)
+                calculation = result["calculation"] or {}
                 require((identity.evidence_id, identity.system_run_id, identity.collection_task_id) ==
-                        (result["id"], result["system_run_id"], result["collection_task_id"]), "ARCHIVE_CONTEXT_MISMATCH")
+                        (calculation.get("raw_reference_id", result["id"]), result["system_run_id"],
+                         result["collection_task_id"]), "ARCHIVE_CONTEXT_MISMATCH")
                 meta = self.archive_reader.read(reference, expected=identity, include_raw=False)["metadata"]
-                record = meta["record"]
+                record = (self.archive_reader.evidence(reference, result["id"])
+                          if calculation.get("canonical_id") is not None else meta["record"])
+                require(record["evidence_id"] == result["id"] and
+                        record.get("canonical_id") == calculation.get("canonical_id") and
+                        record.get("raw_reference_id") == calculation.get("raw_reference_id"),
+                        "ARCHIVE_RECORD_MISMATCH")
+                result.update(canonical_id=record.get("canonical_id"),
+                              raw_reference_id=record.get("raw_reference_id"))
                 require(record["source"] == result["source"] and record["request_timestamp"] == result["timestamp"]
                         and record["supersedes_evidence_id"] == result["supersedes_evidence_id"], "ARCHIVE_RECORD_MISMATCH")
                 calculation = result["calculation"] or {}

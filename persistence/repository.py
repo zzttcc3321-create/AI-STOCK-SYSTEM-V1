@@ -60,7 +60,9 @@ def evidence_row(record, created_at):
             PureWindowsPath(record.raw_response_path).is_absolute()), "ABSOLUTE_RAW_PATH_FORBIDDEN")
     return dict(id=record.evidence_id, analysis_report_id=None, source=record.source.value,
                 timestamp=record.request_timestamp, raw_data_path=record.raw_response_path,
-                calculation=dumps({"normalization_rule": record.normalization_rule,
+                calculation=dumps({**({"canonical_id": record.canonical_id, "raw_reference_id": record.raw_reference_id}
+                                     if record.raw_reference_id is not None else {}),
+                                   "normalization_rule": record.normalization_rule,
                                    "validation_result": {"status": record.validation_result.status.value,
                                                          "failures": record.validation_result.failures},
                                    "normalized_data_hash": record.normalized_data_hash}), model_version=record.model_version,
