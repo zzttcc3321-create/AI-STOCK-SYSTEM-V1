@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from evidence import ArchiveWriter, ArchiveReader, ArchiveIdentity, ArchiveError
 from evidence.archive_contracts import MAX_RAW_BYTES, SIDECAR_NAME, sha256, plain
+from evidence.contracts import DurabilityLevel
 from windows_compat import marked_reparse_point, symlink_privilege_missing, use_simulated_directory_fsync
 
 AT = '2026-10-04T08:00:00+08:00'
@@ -125,14 +126,16 @@ class ArchiveWriterTests(unittest.TestCase):
         def unsupported_open(*args, **kwargs):
             raise unsupported
         unsupported_os.open = unsupported_open
-        with patch.object(ArchiveWriter, '_sync_dir', new=self.production_sync_dir), \
+        with patch.object(self.writer, 'durability_level', DurabilityLevel.DIRECTORY_SYNC), \
+                patch.object(ArchiveWriter, '_sync_dir', new=self.production_sync_dir), \
                 patch('evidence.archive_writer.os', unsupported_os):
             with self.assertRaises(OSError):
                 write(self.writer)
         self.assertFalse(self.writer.resolver.resolve(ID.uri).exists())
 
         write(self.writer)
-        with patch.object(ArchiveWriter, '_sync_dir', new=self.production_sync_dir), \
+        with patch.object(self.writer, 'durability_level', DurabilityLevel.DIRECTORY_SYNC), \
+                patch.object(ArchiveWriter, '_sync_dir', new=self.production_sync_dir), \
                 patch('evidence.archive_writer.os', unsupported_os):
             with self.assertRaises(OSError):
                 self.writer.append_analysis_binding(ID.uri, binding={'analysis_report_id': 'unsupported'})

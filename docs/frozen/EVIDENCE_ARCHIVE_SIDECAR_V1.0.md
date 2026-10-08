@@ -6,6 +6,9 @@ STATUS=FROZEN_FOR_IMPLEMENTATION
 PARENT=EVIDENCE_PIPELINE_DESIGN_V1.0
 IMPLEMENTS=P6_PHYSICAL_ARCHIVE_CONTRACT
 TASK_ID=AI-STOCK-V1-EVIDENCE-ARCHIVE-012B
+CONTRACT_REVISION=#014-R2-WINDOWS-DURABILITY-CONTRACT
+REVISION_TASK_ID=AI-STOCK-V1-014-R2-WINDOWS-DURABILITY-CONTRACT
+REVISION_DECISION=APPROVE_CONTRACT_REVISION (2026-10-08)
 PHYSICAL_CONTRACT=archive://v1/system_run_id/collection_task_id/request_id/evidence_id
 RAW_STORAGE=GZIP_BIT_EXACT_RECOVERABLE
 SIDECAR=APPEND_ONLY
@@ -18,6 +21,8 @@ REAL_PROVIDER_EVIDENCE_WRITE_DEFAULT=DISABLED
 ```
 
 本合同只约束配置启用之后的新归档。父级冻结文档不变；不定义旧引用解释、迁移、回填、删除、DB schema 或 migration。人工确认后 +90 天的父级保留规则继续有效，本实现没有自动删除或后台服务。
+
+#014-R2 经总指挥批准修订耐久合同：目录 fsync 不再是所有平台归档成功的必备条件；文件 flush/fsync、原子提交、显式耐久等级仍为必备条件。以下耐久条款及 sidecar `durability_level` 扩展取代 PR #29 的跨平台目录 fsync 假设，其余约束继续有效。
 
 ## 1. 身份与路径
 
@@ -73,6 +78,7 @@ Raw payload 严格包含以下字段：
 | `record` | `EvidenceRecord` 全字段 JSON；Evidence/run/collection、source、URI、raw hash 必须与 manifest 完全一致 |
 | `parts` / `raw_response_hash` | 上述 manifest / 单 part 或 bundle hash |
 | `attributes` | 非敏感 JSON，例如 http status、response completeness、actual service |
+| `durability_level` | 显式三级状态；提交只接受 `DIRECTORY_SYNC` 或 `FILE_SYNC_ONLY`，参与 sidecar SHA-256 |
 
 Raw record 的标准化/分析字段保持首次采集状态，不通过修改 raw sidecar 补齐后续阶段。
 
@@ -80,19 +86,37 @@ Normalized payload 严格包含 `kind=NORMALIZED / uri / normalized_data / norma
 
 Analysis binding payload 为 `kind=ANALYSIS_BINDING / uri / binding / analysis_output_hash`。binding 使用已验证 `FinalAnalysisEvidence.to_dict()`，包括 report/run/final Evidence、model version、input/used IDs、input/model output/validated output/final snapshot/confirmation log hashes、确认信息、supersedes。`analysis_output_hash` 等于 binding 的 `model_output_hash`，定义为 DB 保存的原始模型输出 UTF-8 bytes 的 SHA-256。该值通过读取并复算已有输出验证，归档流程不调用模型。raw Evidence 的未绑定分析 Hash 保持 null；只有分析上下文验证完成后 read-model 才展示绑定的分析 Hash。
 
+#014-R2：normalized、analysis binding 和 canonical evidence 追加事件的顶层 payload 同样必须记录自己的 `durability_level`。各事件按自己的提交合同解释；raw 的等级不能代表后续事件的等级。此字段位于 sidecar/read-model，不增改 `EvidenceRecord`、数据库 schema 或 migration。
+
 Canonical JSON 与自包含 SHA-256 用于完整性检测，不是签名；root 的写权限是信任边界。请求字段递归删除 token/API key/authorization/password/cookie/session/secret 及其组合变体，不存值或 mask。已知运行凭据还检查普通 bytes、JSON 转义及 Unicode 转义 echo；TDX information 原 R6 检查继续在归档前执行，拒绝的响应不存档。
 
 ## 4. 提交、幂等与失败
 
 Writer 同步执行，根目录 create-exclusive lock 保证多个 Writer 共享配额检查和提交串行化。锁冲突立即 fail-closed；不等待、不启动 daemon。崩溃遗留 lock 需要人工检查，不自动移除。
 
-Raw：同一 filesystem 的隐藏 staging directory → exclusive 文件写 → 检查完整写入 → flush/fsync 每个文件 → 配额复核 → fsync staging → 不覆盖既有身份的目录 rename → fsync parent → Reader 回读验证。新建目录的父目录也 fsync。metadata 是目录内的提交 marker，提交前不会暴露部分目录。
+归档状态的三级耐久等级：
 
-Normalized/binding：隐藏 staging file → exclusive 写/fsync → 配额复核 → 原子 create-if-absent hard link → fsync Evidence directory → 清理 staging。最终文件永不原位改写。
+| durability_level | 提交保证 | Linux | Windows | 可进入 ARCHIVED |
+| --- | --- | --- | --- | --- |
+| `DIRECTORY_SYNC` | 每个文件 flush/fsync，目录项也按下述顺序 fsync | 默认；能力可用时允许 | 不假定可用；显式请求时必须实际成功 | 是 |
+| `FILE_SYNC_ONLY` | 每个文件 flush/fsync，原子 rename/link；不承诺掉电后的目录项持久性 | 显式配置允许 | 默认支持合同 | 是 |
+| `UNVERIFIED` | 未验证／缺失耐久等级 | 禁止提交 | 禁止提交 | 否 |
 
-任何 raw/sidecar/partial write/rename/link/fsync/quota failure 不返回成功；rename 后 parent fsync 失败撤销本次 marker，raw 留作 `ORPHAN_INCOMPLETE`。既有提交永不覆盖、删除或自动修复；失败清理只针对本次创建的 staging/marker。文件系统必须支持目录 fsync、同盘 rename、hard link；不支持时失败关闭，不声称 durable。当前验证环境为 Linux，尚未验证 Windows 目录 fsync 的可用性。
+任务裁决原文的 `FILE_ONLY` 是文件级耐久口径的简称；序列化状态统一使用 `FILE_SYNC_ONLY`，不增加第四种状态。
+
+Writer 在写入前选择合同：`ArchiveWriter(root)` 在 Windows 默认 `FILE_SYNC_ONLY`、Linux 默认 `DIRECTORY_SYNC`；调用方可显式传入 `durability_level="FILE_SYNC_ONLY"` 或 `"DIRECTORY_SYNC"`。拒绝 `UNVERIFIED`。目录合同失败时不自动切换合同；文件 flush/fsync 失败始终 fail-closed。
+
+Raw：同一 filesystem 的隐藏 staging directory → exclusive 文件写 → 检查完整写入 → flush/fsync 每个文件（包括记录耐久等级的 sealed sidecar）→ 配额复核 → 不覆盖既有身份的目录 rename → Reader 回读验证。`DIRECTORY_SYNC` 还要求 rename 前 fsync staging、rename 后 fsync parent、新建目录后 fsync 其父目录。`FILE_SYNC_ONLY` 显式省略目录 fsync，不调用 Windows 不支持的目录打开 primitive。metadata 是目录内的提交 marker，提交前不会暴露部分目录。
+
+Normalized/binding/canonical evidence：隐藏 staging file → exclusive 写/flush/fsync → 配额复核 → 原子 create-if-absent hard link → 清理 staging。`DIRECTORY_SYNC` 在 link 后还要求 fsync Evidence directory；`FILE_SYNC_ONLY` 使用文件级合同。最终文件永不原位改写。
+
+归档成功 = 文件完整写入 + 可用且明确选择的耐久合同满足 + 耐久等级已记录 + Reader 回读验证成功。返回 `ARCHIVED` 与 `IDEMPOTENT_NOOP` 的 receipt、raw metadata 和 Reader.read 结果均显式提供 `durability_level`；追加事件在 sealed payload 中记录等级。
+
+任何 raw/sidecar/partial write/flush/file fsync/rename/link/quota failure 不返回成功；`DIRECTORY_SYNC` 的任意 directory fsync failure 同样不返回成功，rename 后 parent fsync 失败撤销本次 marker，raw 留作 `ORPHAN_INCOMPLETE`。既有提交永不覆盖、删除或自动修复；失败清理只针对本次创建的 staging/marker。文件系统必须支持文件 fsync、同盘 rename、hard link；目录 fsync 只在选择 `DIRECTORY_SYNC` 时强制要求。文件级合同不等于完整掉电目录耐久保证，降级信息不可隐藏。
 
 同身份同内容且已有 raw/raw sidecar 验证通过：`IDEMPOTENT_NOOP`，mtime/bytes 不变。同身份不同 raw 或 metadata：`ARCHIVE_IDENTITY_CONFLICT`。既有身份已损坏则拒绝，不修复。committed metadata 缺 raw：`CORRUPT`；raw 无 committed metadata：`ORPHAN_INCOMPLETE`，不作为证据。
+
+幂等比较忽略本次调用所选择的耐久等级，返回既有 sidecar 实际记录的等级，绝不重写或提升既有等级。缺失等级按 `UNVERIFIED` 处理，Reader、幂等重试及追加均拒绝；不根据平台或旧版本推断历史 durability、不静默回填。无等级旧归档需要保留原文件供诊断，并以新身份重新采集，才能获得新的明确耐久合同。
 
 ## 5. 资源
 

@@ -11,18 +11,28 @@ from .archive_contracts import (ArchiveError, ArchiveIdentity, MAX_RAW_BYTES, MA
     MAX_PARTS, SIDECAR_NAME, bundle_hash, canonical_json, identifier, json_hash, plain,
     reject_secret_echo, reject_sensitive, require, sanitized, sealed, sha256,
     validate_raw_metadata, validate_source_reference, validate_normalized_metadata)
-from .archive_reader import ArchiveReader
+from .archive_reader import ArchiveReader, durable_payload
 from .archive_resolver import ArchiveResolver
 from .builder import EvidenceBuilder
+from .contracts import DurabilityLevel
 
 
 class ArchiveWriter:
-    def __init__(self, root, *, quota_bytes=None, disk_usage=shutil.disk_usage):
+    def __init__(self, root, *, quota_bytes=None, disk_usage=shutil.disk_usage,
+                 durability_level=None):
         self.resolver = ArchiveResolver(root)
         self.reader = ArchiveReader(self.resolver)
         require(quota_bytes is None or type(quota_bytes) is int and quota_bytes >= 0, "QUOTA_INVALID")
         self.quota_bytes = quota_bytes  # Can only lower, never raise the 5% cap.
         self._disk_usage = disk_usage
+        # Select a visible contract before writing. Never catch a failed sync
+        # and silently switch contracts halfway through a commit.
+        if durability_level is None:
+            durability_level = (DurabilityLevel.FILE_SYNC_ONLY if os.name == "nt"
+                                else DurabilityLevel.DIRECTORY_SYNC)
+        require(durability_level in (DurabilityLevel.DIRECTORY_SYNC, DurabilityLevel.FILE_SYNC_ONLY),
+                "ARCHIVE_DURABILITY_UNVERIFIED")
+        self.durability_level = DurabilityLevel(durability_level)
 
     def _mkdir(self, path):
         self.resolver.safe(path)
@@ -74,8 +84,11 @@ class ArchiveWriter:
         require(extra <= self._disk_usage(self.resolver.root).free, "ARCHIVE_DISK_FULL")
 
     def _sync_dir(self, path):
-        # Windows lacks a directory fsync in the stdlib. Fail closed instead of
-        # claiming a durable commit on a platform without this primitive.
+        # Windows' supported default is file durability, recorded in every
+        # sidecar. An explicitly requested directory contract still fails closed
+        # on any directory open/fsync failure, on either platform.
+        if self.durability_level == DurabilityLevel.FILE_SYNC_ONLY:
+            return
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
         try:
             os.fsync(fd)
@@ -120,8 +133,9 @@ class ArchiveWriter:
             raw_reference_id=identity.evidence_id if evidence_id is not None else None)
         meta = dict(version="V1.0", kind="RAW", identity=plain(identity), uri=identity.uri, source=source,
                     source_reference=source_reference, record=plain(record), parts=parts,
-                    raw_response_hash=bundle_hash(parts), attributes=plain(attributes or {}))
-        validate_raw_metadata(meta, identity)
+                    raw_response_hash=bundle_hash(parts), attributes=plain(attributes or {}),
+                    durability_level=self.durability_level.value)
+        validate_raw_metadata(durable_payload(meta), identity)
         encoded = sealed(meta)
         require(len(encoded) <= MAX_METADATA_BYTES, "METADATA_SIZE_LIMIT")
         # Credential guards cover metadata values too; never retain a credential
@@ -131,8 +145,9 @@ class ArchiveWriter:
         with self._lock():
             if directory.exists():
                 existing = self.reader.read(identity.uri, include_raw=False)["metadata"]
-                require(existing == meta, "ARCHIVE_IDENTITY_CONFLICT")
-                return {"status": "IDEMPOTENT_NOOP", "uri": identity.uri, "record": record, "metadata": meta}
+                require(durable_payload(existing) == durable_payload(meta), "ARCHIVE_IDENTITY_CONFLICT")
+                return {"status": "IDEMPOTENT_NOOP", "uri": identity.uri, "record": record,
+                        "metadata": existing, "durability_level": existing["durability_level"]}
             self._quota(sum(((len(v) + 4095) // 4096) * 4096 for v in compressed.values()) +
                         ((len(encoded) + 4095) // 4096) * 4096 + 5 * 4096)
             self._mkdir(directory.parent)
@@ -159,9 +174,11 @@ class ArchiveWriter:
                     shutil.rmtree(staging)
                 raise
             self.reader.read(identity.uri, include_raw=False)
-            return {"status": "ARCHIVED", "uri": identity.uri, "record": record, "metadata": meta}
+            return {"status": "ARCHIVED", "uri": identity.uri, "record": record, "metadata": meta,
+                    "durability_level": meta["durability_level"]}
 
     def _append(self, uri, filename, payload):
+        payload["durability_level"] = self.durability_level.value
         reject_sensitive(payload)
         data = sealed(payload)
         require(len(data) <= MAX_METADATA_BYTES, "METADATA_SIZE_LIMIT")
@@ -170,7 +187,9 @@ class ArchiveWriter:
             self.reader.read(uri, include_raw=False)
             target = self.resolver.file(directory, filename)
             if target.exists():
-                require(self.reader._metadata(directory, filename) == payload, "ARCHIVE_IDENTITY_CONFLICT")
+                existing = self.reader._metadata(directory, filename)
+                require(durable_payload(existing) == durable_payload(payload), "ARCHIVE_IDENTITY_CONFLICT")
+                payload["durability_level"] = existing["durability_level"]
                 return "IDEMPOTENT_NOOP"
             self._quota(((len(data) + 4095) // 4096) * 4096 + 4096)
             # Staging outside the committed directory prevents readers from
