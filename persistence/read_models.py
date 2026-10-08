@@ -1,5 +1,5 @@
 """Read-only DTOs with optional archive verification; no reconstructed gates."""
-from evidence.archive_contracts import ArchiveError, ArchiveIdentity, sha256
+from evidence.archive_contracts import ArchiveError, ArchiveIdentity, json_hash, sha256
 from .contracts import evidence_limitations, EVIDENCE_LIMITATIONS, PersistenceError, require, replay_events, text
 from .serialization import digest, loads
 
@@ -8,6 +8,14 @@ def rows(db, sql, params=()):
     cursor = db.execute(sql, params)
     names = [d[0] for d in cursor.description]
     return [dict(zip(names, row)) for row in cursor]
+
+
+def weakest_durability(levels):
+    """Content verification never implies directory durability."""
+    levels = list(levels)
+    if not levels or any(level not in ("DIRECTORY_SYNC", "FILE_SYNC_ONLY") for level in levels):
+        return "UNVERIFIED"
+    return "FILE_SYNC_ONLY" if "FILE_SYNC_ONLY" in levels else "DIRECTORY_SYNC"
 
 
 class ConfirmationReadRepository:
@@ -167,6 +175,7 @@ class EvidenceReadRepository:
         result["normalization_rule"] = (result["calculation"] or {}).get("normalization_rule")
         result["validation_result"] = (result["calculation"] or {}).get("validation_result")
         result["REPORT_FULL_TRACE"] = False
+        result.update(durability_level="UNVERIFIED", archive_durability_levels={})
         reference = result["raw_data_path"]
         if self.archive_reader is not None and type(reference) is str and reference.startswith("archive://"):
             try:
@@ -175,13 +184,23 @@ class EvidenceReadRepository:
                 require((identity.evidence_id, identity.system_run_id, identity.collection_task_id) ==
                         (calculation.get("raw_reference_id", result["id"]), result["system_run_id"],
                          result["collection_task_id"]), "ARCHIVE_CONTEXT_MISMATCH")
-                meta = self.archive_reader.read(reference, expected=identity, include_raw=False)["metadata"]
+                archive = self.archive_reader.read(reference, expected=identity, include_raw=False)
+                meta = archive["metadata"]
+                levels = {"raw": archive["durability_level"]}
                 record = (self.archive_reader.evidence(reference, result["id"])
                           if calculation.get("canonical_id") is not None else meta["record"])
                 require(record["evidence_id"] == result["id"] and
                         record.get("canonical_id") == calculation.get("canonical_id") and
                         record.get("raw_reference_id") == calculation.get("raw_reference_id"),
                         "ARCHIVE_RECORD_MISMATCH")
+                if calculation.get("canonical_id") is not None:
+                    # evidence() preserves its EvidenceRecord API. Read the sealed
+                    # stage envelope after that record has been independently verified.
+                    canonical = self.archive_reader._metadata(
+                        self.archive_reader.resolver.resolve(reference),
+                        "evidence-" + json_hash(result["id"]) + ".json")
+                    require(canonical["record"] == record, "ARCHIVE_RECORD_MISMATCH")
+                    levels["canonical_evidence"] = canonical["durability_level"]
                 result.update(canonical_id=record.get("canonical_id"),
                               raw_reference_id=record.get("raw_reference_id"))
                 require(record["source"] == result["source"] and record["request_timestamp"] == result["timestamp"]
@@ -192,10 +211,13 @@ class EvidenceReadRepository:
                     normalized = self.archive_reader.normalized(reference, normalized_hash)
                     require(normalized["normalization_rule"] == calculation.get("normalization_rule") and
                             normalized["validation_result"] == calculation.get("validation_result"), "NORMALIZED_RECORD_MISMATCH")
+                    levels["normalized"] = normalized["durability_level"]
                 else:
                     require(calculation.get("normalization_rule") == record["normalization_rule"] and
                             calculation.get("validation_result") == record["validation_result"], "ARCHIVE_RECORD_MISMATCH")
                 result.update(evidence_limitations("VERIFIED_ARCHIVE"), evidence_completeness="VERIFIED_ARCHIVE",
+                              archive_durability_levels=levels,
+                              durability_level=weakest_durability(levels.values()),
                               source_reference=meta["source_reference"],
                               hashes={"raw_response_hash": meta["raw_response_hash"],
                                       "normalized_data_hash": normalized_hash, "analysis_output_hash": None})
@@ -215,6 +237,7 @@ class EvidenceReadRepository:
         evidence = [self.evidence(i) for i in inputs]
         result = {"analysis_report_id": analysis_report_id, "input_evidence_ids": inputs,
                   "used_evidence_ids": used, "evidence": evidence, "REPORT_FULL_TRACE": False,
+                  "durability_level": "UNVERIFIED",
                   "evidence_completeness": "PARTIAL_DB_PROJECTION", **evidence_limitations()}
         if self.archive_reader is None:
             return result
@@ -237,11 +260,16 @@ class EvidenceReadRepository:
             for e in selected:
                 require((e["validation_result"] or {}).get("status") == "PASS" and
                         e["hashes"]["normalized_data_hash"] is not None, "NORMALIZED_EVIDENCE_UNVERIFIED")
-                self.archive_reader.binding(e["raw_data_path"], analysis_report_id, binding)
+                archived_binding = self.archive_reader.binding(e["raw_data_path"], analysis_report_id, binding)
                 for item in evidence:
                     if item is not None and item["id"] == e["id"]:
                         item["hashes"]["analysis_output_hash"] = binding["model_output_hash"]
+                        item["archive_durability_levels"]["analysis_binding"] = archived_binding["durability_level"]
+                        item["durability_level"] = weakest_durability(item["archive_durability_levels"].values())
             result.update(evidence_limitations("VERIFIED_ARCHIVE"), REPORT_FULL_TRACE=True,
+                          durability_level=weakest_durability(
+                              item["durability_level"] if item is not None else "UNVERIFIED"
+                              for item in evidence),
                           evidence_completeness="VERIFIED_ARCHIVE")
         except (ArchiveError, PersistenceError, OSError, KeyError, TypeError, StopIteration, IndexError):
             result.update(evidence_limitations("CORRUPT_ARCHIVE"))
@@ -308,6 +336,7 @@ class EvidenceReadRepository:
                 "evidence_completeness": projection["evidence_completeness"],
                 "REPORT_FULL_TRACE": projection["REPORT_FULL_TRACE"] and all(
                     e is not None and e["integrity_status"] == "VERIFIED" for e in evidence),
+                "durability_level": projection["durability_level"],
                 **{k: projection[k] for k in evidence_limitations()}}
 
     def current_effective_evidence(self, evidence_id):
@@ -451,10 +480,12 @@ class AnalysisReadRepository:
                 "record_origin": "V1_1_PERSISTENCE", "evidence_completeness": "PARTIAL_DB_PROJECTION",
                 **EVIDENCE_LIMITATIONS}
         result["REPORT_FULL_TRACE"] = False
+        result["durability_level"] = "UNVERIFIED"
         if self.archive_reader is not None:
             trace = EvidenceReadRepository(self.db, archive_reader=self.archive_reader).for_analysis(report["id"])
             result.update({k: trace[k] for k in evidence_limitations()},
                           REPORT_FULL_TRACE=trace["REPORT_FULL_TRACE"],
+                          durability_level=trace["durability_level"],
                           evidence_completeness=trace["evidence_completeness"])
         return result
 

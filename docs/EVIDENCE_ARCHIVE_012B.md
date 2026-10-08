@@ -56,7 +56,7 @@ Raw Hash 与 normalized Hash 分别重算；分析 Hash 从既有 DB 原始模�
 
 三个既有测试文件有必要的合同断言维护：`test_tdx_information.py` 把直接物理路径读取改为 ArchiveReader；`test_persistence_read_models.py` 校验新增 calculation.validation_result；`test_persistence_schema_v1_1.py` 把 #012 的历史范围检查固定到 #012A 基线，仍逐字校验冻结 schema 与原 migration 集合。业务状态、缓存、三源范围及历史冻结断言保持。
 
-Linux 文件系统上的提交/故障逻辑已验证。Windows 的目录 fsync 能力未做实机验证；能力不足会 fail-closed。此结果不宣告 Windows persistence 正式运行，不授予真实库 apply 权限。
+历史 #012B 验证使用 Linux 目录 fsync 合同。2026-10-08 的 #014-R2 已获批修订此假设：Windows 默认文件级耐久并显式记录 `FILE_SYNC_ONLY`；Linux 默认 `DIRECTORY_SYNC`，也可显式选择文件级合同。缺失／`UNVERIFIED` 等级不能被认定为已归档。详见[修订合同](frozen/EVIDENCE_ARCHIVE_SIDECAR_V1.0.md)及 [#014-R2 总结](evidence/014_R2_SUMMARY.md)。Windows 实机 E2 仍由 qi 验证；本修订不授予真实库 apply 权限。
 
 最终验证（2026-10-04）：
 

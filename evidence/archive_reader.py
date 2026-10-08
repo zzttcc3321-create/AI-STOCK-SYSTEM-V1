@@ -7,6 +7,17 @@ import re
 from .archive_contracts import (ArchiveError, ArchiveIdentity, CHUNK_BYTES, MAX_METADATA_BYTES,
     SIDECAR_NAME, json_hash, plain, reject_sensitive, require, sha256, unseal, validate_raw_metadata, validate_normalized_metadata)
 from .archive_resolver import ArchiveResolver
+from .contracts import DurabilityLevel
+
+
+def durable_payload(value):
+    """Validate the explicit durability extension before legacy schema checks."""
+    require(type(value) is dict, "SIDECAR_SCHEMA_INVALID")
+    level = value.get("durability_level", DurabilityLevel.UNVERIFIED.value)
+    require(type(level) is str and level in {item.value for item in DurabilityLevel},
+            "ARCHIVE_DURABILITY_INVALID")
+    require(level != DurabilityLevel.UNVERIFIED.value, "ARCHIVE_DURABILITY_UNVERIFIED")
+    return {key: item for key, item in value.items() if key != "durability_level"}
 
 
 class ArchiveReader:
@@ -19,6 +30,7 @@ class ArchiveReader:
         require(len(data) <= MAX_METADATA_BYTES, "METADATA_SIZE_LIMIT")
         value = unseal(data)
         reject_sensitive(value)
+        durable_payload(value)
         return value
 
     def read(self, uri, *, expected=None, include_raw=True):
@@ -28,7 +40,7 @@ class ArchiveReader:
             if not self.resolver.file(directory, SIDECAR_NAME).exists():
                 raise ArchiveError("ORPHAN_INCOMPLETE" if directory.exists() else "ARCHIVE_MISSING")
             meta = self._metadata(directory, SIDECAR_NAME)
-            validate_raw_metadata(meta, identity)
+            validate_raw_metadata(durable_payload(meta), identity)
             allowed = {SIDECAR_NAME} | {p["file"] for p in meta["parts"]}
             raw = {}
             with os.scandir(directory) as entries:
@@ -62,7 +74,8 @@ class ArchiveReader:
                     require(size == p["raw_size"] and raw_hash.hexdigest() == p["raw_sha256"], "RAW_HASH_MISMATCH")
                     if output is not None:
                         raw[p["name"]] = bytes(output)
-            return {"metadata": meta, "raw_parts": raw, "integrity_status": "VERIFIED"}
+            return {"metadata": meta, "raw_parts": raw, "integrity_status": "VERIFIED",
+                    "durability_level": meta["durability_level"]}
         except ArchiveError:
             raise
         except (OSError, ValueError, KeyError, TypeError, EOFError) as exc:
@@ -100,7 +113,7 @@ class ArchiveReader:
         directory = self.resolver.resolve(uri)
         try:
             value = self._metadata(directory, "normalized-" + content_hash + ".json")
-            validate_normalized_metadata(value, uri, content_hash)
+            validate_normalized_metadata(durable_payload(value), uri, content_hash)
             return value
         except (OSError, KeyError, TypeError):
             raise ArchiveError("NORMALIZED_METADATA_MISSING_OR_CORRUPT") from None
@@ -109,7 +122,7 @@ class ArchiveReader:
         self.read(uri, include_raw=False)
         try:
             value = self._metadata(self.resolver.resolve(uri), "binding-" + json_hash(analysis_report_id) + ".json")
-            require(value == {"kind": "ANALYSIS_BINDING", "uri": uri, "binding": plain(expected),
+            require(durable_payload(value) == {"kind": "ANALYSIS_BINDING", "uri": uri, "binding": plain(expected),
                               "analysis_output_hash": plain(expected).get("model_output_hash")},
                     "ANALYSIS_BINDING_MISMATCH")
             return value

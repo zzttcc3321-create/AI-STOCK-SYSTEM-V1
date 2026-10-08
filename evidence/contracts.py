@@ -43,6 +43,14 @@ class EvidenceSource(str, Enum):
     WORKBUDDY_TDX_MCP = "WORKBUDDY_TDX_MCP"
 
 
+class DurabilityLevel(str, Enum):
+    """Archive sidecar/read-model state; never a database schema extension."""
+
+    DIRECTORY_SYNC = "DIRECTORY_SYNC"
+    FILE_SYNC_ONLY = "FILE_SYNC_ONLY"
+    UNVERIFIED = "UNVERIFIED"
+
+
 class ValidationStatus(str, Enum):
     PASS = "PASS"
     FAIL = "FAIL"

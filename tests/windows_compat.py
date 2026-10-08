@@ -9,19 +9,13 @@ from unittest.mock import patch
 
 @contextmanager
 def simulated_directory_fsync():
-    """Simulate successful directory fsync only inside Windows tests.
+    """Compatibility context: exercise the production durability contract.
 
-    Return the unpatched production method so fail-closed tests can exercise it
-    explicitly while the surrounding test continues to use this seam.
+    Kept for existing callers; Windows no longer needs a mocked directory sync.
     """
     from evidence import ArchiveWriter
 
-    production_sync_dir = ArchiveWriter._sync_dir
-    if os.name != "nt":
-        yield production_sync_dir
-        return
-    with patch.object(ArchiveWriter, "_sync_dir", autospec=True):
-        yield production_sync_dir
+    yield ArchiveWriter._sync_dir
 
 
 def use_simulated_directory_fsync(test_case):
