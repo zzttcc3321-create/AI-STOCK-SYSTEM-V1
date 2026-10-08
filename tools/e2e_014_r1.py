@@ -24,6 +24,11 @@ from test_dashboard_runtime import runtime_fixture, confirm_items
 APPROVED_014_R2_FROZEN_FILES = frozenset({
     'docs/frozen/EVIDENCE_ARCHIVE_SIDECAR_V1.0.md',
 })
+# Approved content from d4be4c57dfd53b6d04a8c84c22fb1bdffcec6fad.
+APPROVED_014_R2_FROZEN_BLOB = {
+    'docs/frozen/EVIDENCE_ARCHIVE_SIDECAR_V1.0.md':
+        '01c8b518399fe1ea2ab2e0b33af5b8586e265a64',
+}
 
 
 def git(*args):
@@ -36,7 +41,12 @@ def verify_protected_paths(baseline):
                       'docs/frozen').splitlines())
     protected = changed - APPROVED_014_R2_FROZEN_FILES
     assert not protected, 'Protected paths changed: ' + ', '.join(sorted(protected))
-    return sorted(changed & APPROVED_014_R2_FROZEN_FILES)
+    approved_changes = sorted(changed & APPROVED_014_R2_FROZEN_FILES)
+    for path in approved_changes:
+        blob = git('rev-parse', 'HEAD:' + path)
+        assert blob == APPROVED_014_R2_FROZEN_BLOB[path], \
+            'Frozen path re-modified beyond approved: ' + path
+    return approved_changes
 
 
 def verify():
