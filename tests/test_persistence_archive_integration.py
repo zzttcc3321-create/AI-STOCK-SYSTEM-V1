@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from evidence import ArchiveIdentity, ArchiveWriter
-from evidence.archive_contracts import plain, SIDECAR_NAME
+from evidence.archive_contracts import plain, SIDECAR_NAME, json_hash, sealed, unseal
 from persistence.connection import configure
 from persistence.contracts import PersistenceError
 from persistence.migration import apply_migration
@@ -153,6 +153,49 @@ class PersistenceArchiveIntegrationTests(unittest.TestCase):
         self.assertEqual(self.db.total_changes, before)
         with self.assertRaises(ValueError):
             self.writer.reader.read('tdx-local/run/collection/request/raw.json')
+
+    def test_analysis_binding_exposes_actual_weaker_durability_in_read_only_queries(self):
+        record = next(r for r in self.records if r.evidence_id in self.binding['used_evidence_ids'])
+        directory = self.writer.resolver.resolve(record.raw_response_path)
+        (directory / ('binding-' + json_hash(self.flow.analysis_report_id) + '.json')).unlink()
+        weak_writer = ArchiveWriter(self.root, durability_level='FILE_SYNC_ONLY')
+        weak_writer.append_analysis_binding(record.raw_response_path, binding=self.binding)
+        self.persist_final()
+        self.db.execute('PRAGMA query_only=ON')
+        before = self.db.total_changes
+        repo = EvidenceReadRepository(self.db, archive_reader=self.writer.reader)
+        standalone = repo.evidence(record.evidence_id)
+        self.assertEqual(standalone['durability_level'], self.writer.durability_level.value)
+        self.assertNotIn('analysis_binding', standalone['archive_durability_levels'])
+        result = repo.for_analysis(self.flow.analysis_report_id)
+        item = next(e for e in result['evidence'] if e['id'] == record.evidence_id)
+        self.assertEqual(item['archive_durability_levels'],
+                         {'raw': self.writer.durability_level.value,
+                          'normalized': self.writer.durability_level.value,
+                          'analysis_binding': 'FILE_SYNC_ONLY'})
+        self.assertEqual(item['durability_level'], 'FILE_SYNC_ONLY')
+        self.assertEqual(result['durability_level'], 'FILE_SYNC_ONLY')
+        self.assertEqual(result['integrity_status'], 'VERIFIED')
+        self.assertTrue(result['REPORT_FULL_TRACE'])
+        analysis = AnalysisReadRepository(self.db, archive_reader=self.writer.reader)
+        self.assertEqual(analysis.latest_confirmed_analysis(self.flow.run_evidence.stock_id)
+                         ['analysis']['durability_level'], 'FILE_SYNC_ONLY')
+        trace = repo.field_evidence_trace(self.flow.analysis_report_id, 'market_view')
+        self.assertEqual(trace['durability_level'], 'FILE_SYNC_ONLY')
+        self.assertEqual(self.db.total_changes, before)
+
+    def test_missing_binding_durability_cannot_claim_verified_report(self):
+        self.persist_final()
+        record = next(r for r in self.records if r.evidence_id in self.binding['used_evidence_ids'])
+        path = self.writer.resolver.resolve(record.raw_response_path) / (
+            'binding-' + json_hash(self.flow.analysis_report_id) + '.json')
+        payload = unseal(path.read_bytes())
+        payload.pop('durability_level')
+        path.write_bytes(sealed(payload))
+        result = EvidenceReadRepository(self.db, archive_reader=self.writer.reader).for_analysis(self.flow.analysis_report_id)
+        self.assertFalse(result['REPORT_FULL_TRACE'])
+        self.assertEqual(result['integrity_status'], 'CORRUPT')
+        self.assertEqual(result['durability_level'], 'UNVERIFIED')
 
     def test_archive_corruption_during_inserts_rolls_back(self):
         original = self.repo._insert

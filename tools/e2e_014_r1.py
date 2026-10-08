@@ -19,8 +19,24 @@ from test_information_archive_roundtrip import archived_information
 from test_dashboard_runtime import runtime_fixture, confirm_items
 
 
+# #014-R2: commander-approved durability contract revision only. Every other
+# frozen file, migration and schema remains protected.
+APPROVED_014_R2_FROZEN_FILES = frozenset({
+    'docs/frozen/EVIDENCE_ARCHIVE_SIDECAR_V1.0.md',
+})
+
+
 def git(*args):
     return subprocess.check_output(['git', '-C', str(ROOT), *args], text=True).strip()
+
+
+def verify_protected_paths(baseline):
+    changed = set(git('diff', '--name-only', baseline, 'HEAD', '--', 'migration',
+                      'persistence/migration.py', 'persistence/schema_v1_1.py',
+                      'docs/frozen').splitlines())
+    protected = changed - APPROVED_014_R2_FROZEN_FILES
+    assert not protected, 'Protected paths changed: ' + ', '.join(sorted(protected))
+    return sorted(changed & APPROVED_014_R2_FROZEN_FILES)
 
 
 def verify():
@@ -30,13 +46,12 @@ def verify():
               'E7': 'NOT_RUN_WINDOWS_QI_DEFERRED'}
     baseline = git('rev-parse', '5a86655')
     subprocess.run(['git', '-C', str(ROOT), 'merge-base', '--is-ancestor', baseline, 'HEAD'], check=True)
-    protected = git('diff', '--name-only', baseline, 'HEAD', '--', 'migration', 'persistence/migration.py',
-                    'persistence/schema_v1_1.py', 'docs/frozen')
-    assert not protected
+    approved_changes = verify_protected_paths(baseline)
     status = git('status', '--short')
     result['E0'] = {'status': 'PASS_DEV_SCOPE' if not status else 'FAIL_WORKTREE_DIRTY',
         'baseline': baseline, 'head': git('rev-parse', 'HEAD'), 'worktree_clean': not bool(status),
-        'protected_paths_unchanged': True, 'real_schema_B_old32_digest': 'NOT_RUN_WINDOWS_DEFERRED'}
+        'protected_paths_unchanged': True, 'approved_014_r2_frozen_changes': approved_changes,
+        'real_schema_B_old32_digest': 'NOT_RUN_WINDOWS_DEFERRED'}
     with tempfile.TemporaryDirectory(prefix='e2e014r1-') as temporary:
         writer = ArchiveWriter(Path(temporary) / 'information')
         checked = []
