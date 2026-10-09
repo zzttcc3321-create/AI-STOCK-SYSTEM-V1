@@ -12,8 +12,8 @@ class ArchiveResolver:
         if not root.is_absolute():
             root = Path.cwd() / root
         # Keep '..' until every original ancestor has passed lstat checks.
-        self.safe(root)
-        self.root = Path(os.path.realpath(root))
+        root = self.safe(root)
+        self.root = self.safe(Path(os.path.realpath(root)))
 
     def safe(self, path):
         path = Path(path)
@@ -28,6 +28,16 @@ class ArchiveResolver:
             require(not stat.S_ISLNK(mode) and not (getattr(info, "st_file_attributes", 0) &
                     getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)), "SYMLINK_ESCAPE_REJECTED")
             require(stat.S_ISDIR(mode) or stat.S_ISREG(mode), "SPECIAL_FILE_REJECTED")
+        if os.name == "nt":
+            # Filesystem-only representation: inspect first, then prefix.
+            # Extended UNC paths are unsupported just like ordinary UNC paths.
+            value, prefix = str(path), "\\\\?\\"
+            extended = value.startswith(prefix)
+            require(not (value.startswith("\\\\") and not extended) and
+                    not value.upper().startswith(prefix + "UNC\\"), "WINDOWS_UNC_PATH_REJECTED")
+            require(path.is_absolute(), "WINDOWS_RELATIVE_PATH_REJECTED")
+            if not extended:
+                path = Path(prefix + value)
         return path
 
     def resolve(self, uri, *, expected=None):
