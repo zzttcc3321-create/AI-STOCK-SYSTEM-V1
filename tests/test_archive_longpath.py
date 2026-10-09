@@ -58,11 +58,52 @@ class WindowsLongPathPolicyTests(unittest.TestCase):
         with windows_paths(), self.assertRaisesRegex(ArchiveError, 'UNC'):
             self.resolver.safe(PREFIX + r'UNC\server\share\archive')
 
+    def test_unc_rejected_without_filesystem_access(self):
+        calls = []
+        original = WindowsProbePath.lstat
+
+        def counting(path):
+            calls.append(str(path))
+            return original(path)
+
+        with windows_paths(), patch.object(WindowsProbePath, 'lstat', counting):
+            for path in (r'\\server\share\archive', PREFIX + r'UNC\server\share\archive'):
+                with self.subTest(path=path):
+                    with self.assertRaisesRegex(ArchiveError, 'UNC'):
+                        self.resolver.safe(path)
+                    self.assertEqual(calls, [])
+
+    def test_device_namespaces_rejected_without_filesystem_access(self):
+        calls = []
+        original = WindowsProbePath.lstat
+
+        def counting(path):
+            calls.append(str(path))
+            return original(path)
+
+        paths = (PREFIX + r'GLOBALROOT\SystemRoot',
+                 PREFIX + 'Volume{b75e2c83-0000-0000-0000-000000000000}\\')
+        with windows_paths(), patch.object(WindowsProbePath, 'lstat', counting):
+            for path in paths:
+                with self.subTest(path=path):
+                    with self.assertRaisesRegex(ArchiveError, 'DEVICE|NAMESPACE'):
+                        self.resolver.safe(path)
+                    self.assertEqual(calls, [])
+
+    def test_extended_prefix_non_drive_path_rejected(self):
+        with windows_paths(), patch.object(WindowsProbePath, 'lstat',
+                                          side_effect=FileNotFoundError) as lstat:
+            with self.assertRaisesRegex(ArchiveError, 'DEVICE|NAMESPACE'):
+                self.resolver.safe(PREFIX + r'foo\bar')
+            lstat.assert_not_called()
+
     def test_relative_and_drive_relative_are_rejected(self):
-        with windows_paths():
+        with windows_paths(), patch.object(WindowsProbePath, 'lstat',
+                                          side_effect=FileNotFoundError) as lstat:
             for path in ('archive', r'archive\v1', r'C:archive', r'\archive'):
                 with self.subTest(path=path), self.assertRaisesRegex(ArchiveError, 'RELATIVE'):
                     self.resolver.safe(path)
+            lstat.assert_not_called()
 
     def test_root_keeps_checked_prefix_for_direct_filesystem_calls(self):
         with windows_paths() as windows_os:
