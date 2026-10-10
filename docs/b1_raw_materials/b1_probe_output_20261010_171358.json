@@ -1,0 +1,153 @@
+{
+  "probe": "B1_UNIT_PROVENANCE",
+  "collected_at": "2026-10-10T17:13:58.741428",
+  "tdx_url": "http://127.0.0.1:17709/",
+  "probe_stock": "601518.SH",
+  "readonly": true,
+  "calls": [
+    {
+      "method": "get_stock_info",
+      "params": {
+        "stock_code": "601518.SH"
+      },
+      "result": {
+        "id": 1,
+        "result": {
+          "ActiveCapital": "189055.31",
+          "BelongHS300": "0",
+          "BelongHSGT": "1",
+          "BelongHasKQZ": "0",
+          "BelongRZRQ": "0",
+          "DelayMin": "0",
+          "ErrorId": "0",
+          "Fz": [
+            "570",
+            "690",
+            "780",
+            "900",
+            "900",
+            "900",
+            "900",
+            "900"
+          ],
+          "HKVolBaseRate": "0",
+          "HSStockKind": "1",
+          "IsHKGP": "0",
+          "IsQH": "0",
+          "IsQQ": "0",
+          "IsQuitGP": "0",
+          "IsSTGP": "0",
+          "J_HalfYearFlag": "6",
+          "J_bg": "0.00",
+          "J_ch": "30323.08",
+          "J_cqfz": "49546.21",
+          "J_gdqyb": "0.87",
+          "J_gdrs": "37370.00",
+          "J_gdzc": "387810.56",
+          "J_hg": "0.00",
+          "J_jly": "22308.53",
+          "J_jyl": "3.92",
+          "J_jyxjl": "28811.51",
+          "J_jzc": "569170.13",
+          "J_ldfz": "83602.80",
+          "J_ldzc": "305246.09",
+          "J_lyze": "32144.64",
+          "J_mggjj": "0.06",
+          "J_mgjzc": "3.01",
+          "J_mgjzc2": "3.01",
+          "J_mgsy": "0.24",
+          "J_mgsy2": "0.00",
+          "J_mgwfp": "1.72",
+          "J_shly": "24008.25",
+          "J_start": "20100319",
+          "J_tzsy": "0.00",
+          "J_wfply": "324312.59",
+          "J_wxzc": "1705.53",
+          "J_yszk": "14734.79",
+          "J_yycb": "16987.92",
+          "J_yyly": "32170.64",
+          "J_yysy": "52139.25",
+          "J_zbgjj": "11539.26",
+          "J_zgb": "189055.31",
+          "J_zxjl": "27803.99",
+          "J_zzc": "703565.94",
+          "MinPrice": "0.01",
+          "Name": "吉林高速",
+          "QHVolBaseRate": "0",
+          "TodayDRFlag": "0",
+          "Unit": "100",
+          "VolBase": "368.42",
+          "XsFlag": "2",
+          "blockzscode": "881442",
+          "rs_hycode_sim": "X6101",
+          "rs_hyname": "公路铁路",
+          "tdx_dycode": "3",
+          "tdx_dyname": "吉林板块",
+          "underly_code": "",
+          "underly_setcode": "0"
+        }
+      }
+    },
+    {
+      "method": "get_market_snapshot",
+      "params": {
+        "stock_code": "601518.SH"
+      },
+      "result": {
+        "id": 2,
+        "result": {
+          "Amount": "3397.11",
+          "Average": "2.79",
+          "Before5MinNow": "2.79",
+          "Buyp": [
+            "2.79",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00"
+          ],
+          "Buyv": [
+            "8705",
+            "0",
+            "0",
+            "0",
+            "0"
+          ],
+          "DownHome": "0",
+          "ErrorId": "0",
+          "InOutFlag": "2",
+          "Inside": "39250",
+          "ItemNum": "1261",
+          "Jjjz": "0.00",
+          "LastClose": "2.78",
+          "Max": "2.81",
+          "Min": "2.77",
+          "Now": "2.80",
+          "NowVol": "1752",
+          "Open": "2.78",
+          "Outside": "82497",
+          "Sellp": [
+            "2.80",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00"
+          ],
+          "Sellv": [
+            "4115",
+            "0",
+            "0",
+            "0",
+            "0"
+          ],
+          "TickDiff": "0.00",
+          "UpHome": "0",
+          "Volume": "121746",
+          "XsFlag": "2",
+          "ZAFPre3": "1.45",
+          "Zangsu": "0.36"
+        }
+      }
+    }
+  ]
+}
