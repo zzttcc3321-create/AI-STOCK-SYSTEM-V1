@@ -42,6 +42,7 @@ from evidence import ArchiveWriter
 from providers import ProviderStatus
 from providers.tdx_information import TdxInformationProvider
 from providers.tdx_realtime import TdxLocalHttpProvider
+from evidence.archive_reader import ArchiveReader
 
 TASK_ID = "AI-STOCK-V1-014-E2-WINDOWS-VERIFY-HARNESS-R1"
 # Empty verified-units declaration: unverified units must never produce
@@ -80,13 +81,23 @@ def new_run_dir(output_dir: str | Path) -> Path:
             f"REFUSED: output directory already exists: {path}\n"
             "Specify a new, non-existent directory to avoid overwriting "
             "historical evidence.")
-    # B04: refuse symlinks / Windows reparse points anywhere in the path.
+    # B04: refuse symlinks AND Windows junctions / reparse points
+    # anywhere in the path. is_symlink() alone misses junctions.
+    def _is_junction(p: Path) -> bool:
+        is_junc = getattr(p, "is_junction", None)
+        if callable(is_junc):
+            try:
+                return bool(is_junc())
+            except OSError:
+                return False
+        return False
+
     probe = path
     while True:
-        if probe.is_symlink():
+        if probe.is_symlink() or _is_junction(probe):
             raise SystemExit(
-                f"REFUSED: path component is a symlink: {probe}\n"
-                "Symlinks could redirect evidence outside the isolated dir.")
+                f"REFUSED: path component is a link/reparse point: {probe}\n"
+                "Links could redirect evidence outside the isolated dir.")
         parent = probe.parent
         if parent == probe:
             break
@@ -101,6 +112,16 @@ def new_run_dir(output_dir: str | Path) -> Path:
             "Evidence must go to an isolated directory outside the repo.")
     except ValueError:
         pass  # not inside repo: acceptable
+    # B04: refuse historical archive roots (e.g. D:\e2e014-rerun-runtime).
+    # Re-running into them would overwrite prior evidence.
+    _HISTORICAL_ARCHIVE_MARKERS = ("e2e014-rerun-runtime", "e2e014-rerun")
+    lowered = str(resolved).lower()
+    for marker in _HISTORICAL_ARCHIVE_MARKERS:
+        if marker in lowered:
+            raise SystemExit(
+                f"REFUSED: output directory is inside a historical archive "
+                f"root ({marker}): {resolved}\n"
+                "Use a fresh isolated directory instead.")
     path.mkdir(parents=True)
     return path.resolve()
 
@@ -315,13 +336,40 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
     control = info.health_check()
     summary["control_plane"] = control.value
     if control != ProviderStatus.AVAILABLE:
-        summary["result"] = "BLOCKED_AUTH"
+        # B06: only AUTH_FAILED maps to BLOCKED_AUTH. TIMEOUT,
+        # NOT_AVAILABLE, VALIDATION_FAILED, etc. keep their real cause;
+        # the run is INCOMPLETE, never misreported as an auth problem.
+        if control == ProviderStatus.AUTH_FAILED:
+            summary["result"] = "BLOCKED_AUTH"
+        else:
+            summary["result"] = "INCOMPLETE"
         summary["note"] = ("Control plane not AVAILABLE "
                            f"({control.value}); business calls skipped.")
         return summary
     if not (date_from and date_to):
         summary["result"] = "SKIPPED_MISSING_DATE_RANGE"
         return summary
+    # B03: verify each call's archive by actually reading it back.
+    # A fabricated raw_reference (e.g. "ref/y") fails the read and can
+    # never yield PASS.
+    reader = ArchiveReader(run_dir / "phase_c")
+
+    def _verify_call(label, r):
+        info = {"status": r.status.value,
+                "archive_present": bool(r.raw_reference),
+                "archive_verified": False,
+                "archive_integrity": None}
+        if r.raw_reference and r.status in (ProviderStatus.AVAILABLE,
+                                            ProviderStatus.NOT_AVAILABLE):
+            try:
+                back = reader.read(r.raw_reference)
+                info["archive_integrity"] = back.get("integrity_status")
+                info["archive_verified"] = (
+                    back.get("integrity_status") == "VERIFIED")
+            except Exception as exc:  # noqa: BLE001 - record, don't leak
+                info["archive_read_error"] = type(exc).__name__
+        return info
+
     results = {}
     for label, tool, kind in (
             ("announcement", "wenda_notice_query", "announcement"),
@@ -333,8 +381,7 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
             "stock_id": stock_id, "tool": tool, "data_kind": kind,
             "arguments": {"bdate": date_from, "edate": date_to},
         })
-        results[label] = {"status": r.status.value,
-                          "archive_present": bool(r.raw_reference)}
+        results[label] = _verify_call(label, r)
     for view in ("profit", "balance", "cashflow"):
         r = info.fetch({
             "system_run_id": "e2win" + uuid.uuid4().hex,
@@ -343,17 +390,17 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
             "stock_id": stock_id, "tool": "tdx_api_data",
             "data_kind": "financial", "arguments": {"view": view},
         })
-        results["financial_" + view] = {"status": r.status.value,
-                                        "archive_present": bool(r.raw_reference)}
+        results["financial_" + view] = _verify_call(view, r)
     summary["calls"] = results
-    # B03: PASS only if every business call genuinely succeeded.
-    # AVAILABLE or NOT_AVAILABLE (explicit nodata classification) with an
-    # archive are acceptable. AUTH_FAILED / VALIDATION_FAILED / missing
-    # archive are real failures, never silently passed.
+    # B03: PASS only if every business call genuinely succeeded AND its
+    # archive reads back with VERIFIED integrity. AVAILABLE or
+    # NOT_AVAILABLE (explicit nodata classification) are acceptable
+    # statuses. AUTH_FAILED / VALIDATION_FAILED / unreadable archive are
+    # real failures, never silently passed.
     acceptable = {"AVAILABLE", "NOT_AVAILABLE"}
     failed_calls = {
         label: info for label, info in results.items()
-        if info["status"] not in acceptable or not info["archive_present"]
+        if info["status"] not in acceptable or not info["archive_verified"]
     }
     summary["failed_calls"] = failed_calls
     if failed_calls:
@@ -394,15 +441,26 @@ def main(argv: list[str] | None = None) -> int:
     # B05: a phase raising an exception must still produce a complete
     # failure report (never a missing verify_report.json) with a non-zero
     # exit code, without masking the real error.
+    # B05: desensitized error records. The raw exception text is never
+    # persisted to the report; it may contain credentials, tokens, or
+    # session identifiers. Only the stable type name and a fixed code go
+    # into verify_report.json.
+    def _desensitized_error(exc: BaseException) -> dict:
+        return {
+            "error_type": type(exc).__name__,
+            "error_code": "PHASE_EXCEPTION",
+            "error": "phase raised; details withheld from report",
+        }
+
     def _run_phase(name, fn, *a, **k):
         try:
             return fn(*a, **k)
         except SystemExit:
             raise
         except Exception as exc:  # noqa: BLE001 - report, don't mask
-            return {"phase": name, "result": "FAIL",
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:500]}
+            rec = _desensitized_error(exc)
+            rec.update({"phase": name, "result": "FAIL"})
+            return rec
     if args.mode in ("offline", "all"):
         phases.append(_run_phase("A_offline", phase_a_offline, run_dir))
     if args.mode in ("quote", "all"):

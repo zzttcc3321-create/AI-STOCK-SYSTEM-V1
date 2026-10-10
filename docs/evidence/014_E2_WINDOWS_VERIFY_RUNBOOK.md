@@ -43,6 +43,18 @@ python tools/e2_windows_verify.py --output-dir "D:\e2-verify-<run-id>" --mode al
 
 ## 4. 阶段说明与结果定义
 
+### 结果状态与退出码（B02/B06）
+
+| overall | exit | 含义 |
+|---------|------|------|
+| PASS | 0 | 所有执行阶段真正通过 |
+| FAIL | 1 | 任一阶段失败 |
+| INCOMPLETE | 2 | 有阶段被阻断/跳过但无失败；验证不完整，绝不谎报 PASS |
+
+阶段级 `BLOCKED_AUTH` 仅当控制面 `health_check()` 返回 `AUTH_FAILED`
+时使用。`TIMEOUT` / `NOT_AVAILABLE` / `VALIDATION_FAILED` 等控制面
+状态保留真实原因，阶段记 `INCOMPLETE`（B06）。
+
 ### Phase A — 离线合同检查
 使用合成数据走 `make_envelope` → `materialize` 全链路，验证：
 信封构建、归档写入、Raw 回读、数值字段检查、Hash 校验、

@@ -321,8 +321,8 @@ class B03RealValueTests(unittest.TestCase):
             self.assertIn("failed_calls", result)
             self.assertTrue(len(result["failed_calls"]) > 0)
 
-    def test_phase_c_passes_when_calls_succeed(self):
-        """phase_c PASS requires real successful calls."""
+    def test_phase_c_rejects_fabricated_reference(self):
+        """B03: a fabricated raw_reference must FAIL archive readback."""
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = harness.new_run_dir(Path(tmp) / "run")
             with patch.dict("os.environ",
@@ -333,13 +333,63 @@ class B03RealValueTests(unittest.TestCase):
                         ProviderStatus.AVAILABLE
                     good = MagicMock()
                     good.status = ProviderStatus.AVAILABLE
-                    good.raw_reference = "ref/y"
+                    good.raw_reference = "ref/y"  # fabricated: no archive
                     mock_info.fetch.return_value = good
                     cls.return_value = mock_info
                     result = harness.phase_c_real_info(
                         run_dir, "601518.SH", "20260911", "20261011")
-            self.assertEqual(result["result"], "PASS")
-            self.assertEqual(result["failed_calls"], {})
+            # ArchiveReader.read("ref/y") raises -> archive_verified False
+            self.assertEqual(result["result"], "FAIL")
+            self.assertTrue(len(result["failed_calls"]) > 0)
+
+
+class B06ControlPlaneMappingTests(unittest.TestCase):
+    """B06: only AUTH_FAILED maps to BLOCKED_AUTH."""
+
+    def _run_phase_c(self, run_dir, control_status):
+        import os
+        from unittest.mock import MagicMock, patch
+        from providers import ProviderStatus
+        import tools.e2_windows_verify as harness
+        with patch.dict("os.environ", {"TDX_MCP_API_KEY": "k"}, clear=False):
+            with patch.object(harness, "TdxInformationProvider") as cls:
+                mock_info = MagicMock()
+                mock_info.health_check.return_value = control_status
+                cls.return_value = mock_info
+                return harness.phase_c_real_info(
+                    run_dir, "601518.SH", "20260911", "20261011")
+
+    def test_auth_failed_maps_to_blocked_auth(self):
+        import tempfile
+        from pathlib import Path
+        from providers import ProviderStatus
+        import tools.e2_windows_verify as harness
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            result = self._run_phase_c(run_dir, ProviderStatus.AUTH_FAILED)
+            self.assertEqual(result["result"], "BLOCKED_AUTH")
+
+    def test_timeout_maps_to_incomplete_not_blocked_auth(self):
+        import tempfile
+        from pathlib import Path
+        from providers import ProviderStatus
+        import tools.e2_windows_verify as harness
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            result = self._run_phase_c(run_dir, ProviderStatus.TIMEOUT)
+            self.assertEqual(result["result"], "INCOMPLETE")
+            self.assertNotEqual(result["result"], "BLOCKED_AUTH")
+
+    def test_unavailable_maps_to_incomplete(self):
+        import tempfile
+        from pathlib import Path
+        from providers import ProviderStatus
+        import tools.e2_windows_verify as harness
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            result = self._run_phase_c(run_dir,
+                                       ProviderStatus.NOT_AVAILABLE)
+            self.assertEqual(result["result"], "INCOMPLETE")
 
 
 class B04PathBoundaryTests(unittest.TestCase):
@@ -369,13 +419,36 @@ class B04PathBoundaryTests(unittest.TestCase):
             sub = link / "run-new"
             with self.assertRaises(SystemExit) as ctx:
                 harness.new_run_dir(sub)
-            self.assertIn("symlink", str(ctx.exception).lower())
+            self.assertIn("link/reparse", str(ctx.exception).lower())
 
     def test_accepts_tmp_isolated_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "isolated-run"
             out = harness.new_run_dir(target)
             self.assertTrue(out.is_dir())
+
+    def test_refuses_junction_component(self):
+        """B04: Windows junctions / reparse points are refused."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "run-new"
+            # Simulate a junction by patching is_junction on the instance.
+            orig_resolve = Path.resolve
+            def fake_resolve(self):
+                return orig_resolve(self)
+            with patch.object(Path, "is_junction", create=True,
+                              return_value=True):
+                with self.assertRaises(SystemExit) as ctx:
+                    harness.new_run_dir(target)
+            self.assertIn("REFUSED", str(ctx.exception))
+
+    def test_refuses_historical_archive_root(self):
+        """B04: historical archive roots (e2e014-rerun-runtime) refused."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "e2e014-rerun-runtime" / "new-run"
+            with self.assertRaises(SystemExit) as ctx:
+                harness.new_run_dir(target)
+            self.assertIn("REFUSED", str(ctx.exception))
+            self.assertIn("historical", str(ctx.exception).lower())
 
 
 class B05ExceptionHandlingTests(unittest.TestCase):
@@ -390,7 +463,8 @@ class B05ExceptionHandlingTests(unittest.TestCase):
                               side_effect=boom):
                 rc = harness.main(["--output-dir", str(run_dir / "inner"),
                                    "--mode", "offline"])
-            # Non-zero exit, report exists, phase marked FAIL with error.
+            # Non-zero exit, report exists, phase marked FAIL with
+            # desensitized error (B05: raw text never persisted).
             self.assertNotEqual(rc, 0)
             report_path = run_dir / "inner" / "verify_report.json"
             self.assertTrue(report_path.exists())
@@ -399,7 +473,27 @@ class B05ExceptionHandlingTests(unittest.TestCase):
             phase = report["phases"][0]
             self.assertEqual(phase["result"], "FAIL")
             self.assertEqual(phase["error_type"], "RuntimeError")
-            self.assertIn("simulated phase crash", phase["error"])
+            self.assertEqual(phase["error_code"], "PHASE_EXCEPTION")
+            self.assertNotIn("simulated phase crash", phase["error"])
+            self.assertNotIn("simulated phase crash",
+                             report_path.read_text(encoding="utf-8"))
+
+    def test_phase_exception_with_secret_does_not_leak(self):
+        """B05: exception text carrying secrets must not reach the report."""
+        secret = "Authorization: Bearer SECRET_TOKEN_XYZ123"
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            def boom(_run_dir):
+                raise RuntimeError(secret)
+            with patch.object(harness, "phase_a_offline",
+                              side_effect=boom):
+                rc = harness.main(["--output-dir", str(run_dir / "inner"),
+                                   "--mode", "offline"])
+            self.assertNotEqual(rc, 0)
+            raw = (run_dir / "inner" / "verify_report.json").read_text(
+                encoding="utf-8")
+            self.assertNotIn("SECRET_TOKEN_XYZ123", raw)
+            self.assertNotIn("Authorization", raw)
 
 
 if __name__ == "__main__":
