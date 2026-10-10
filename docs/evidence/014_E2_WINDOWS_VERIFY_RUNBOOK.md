@@ -68,10 +68,14 @@ python tools/e2_windows_verify.py --output-dir "D:\e2-verify-<run-id>" --mode al
 不得进入 VERIFIED Canonical（预期受限）。
 
 ### Phase C — H-I1 信息链路
-先执行 `health_check()` 控制面探针。非 `AVAILABLE` 时标记
-`BLOCKED_AUTH` 并跳过业务调用。恢复后测试公告/新闻/
+先执行 `health_check()` 控制面探针。仅当返回 `AUTH_FAILED`
+时标记 `BLOCKED_AUTH`；`TIMEOUT` / `NOT_AVAILABLE` /
+`VALIDATION_FAILED` 等保留真实原因，阶段记 `INCOMPLETE`
+（B06）。业务调用跳过。恢复后测试公告/新闻/
 财务三视图的明确空通知（`NOT_AVAILABLE`）与未知散文
-（`VALIDATION_FAILED`）分类。
+（`VALIDATION_FAILED`）分类。归档验证包含请求绑定检查：
+回读的证据必须属于本次请求的股票（stock_id）、工具
+（tool）与参数（arguments）（B03）。
 
 ## 5. 证据清单
 

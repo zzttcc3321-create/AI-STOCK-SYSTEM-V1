@@ -84,13 +84,25 @@ def new_run_dir(output_dir: str | Path) -> Path:
     # B04: refuse symlinks AND Windows junctions / reparse points
     # anywhere in the path. is_symlink() alone misses junctions.
     def _is_junction(p: Path) -> bool:
+        # B04 fix: fail-closed. Junctions are a Windows reparse-point
+        # threat; on Windows we must be able to verify, otherwise refuse.
+        # On non-Windows platforms junctions do not exist and is_symlink()
+        # already covers the link threat model.
         is_junc = getattr(p, "is_junction", None)
-        if callable(is_junc):
-            try:
-                return bool(is_junc())
-            except OSError:
-                return False
-        return False
+        if not callable(is_junc):
+            if sys.platform == "win32":
+                raise SystemExit(
+                    f"REFUSED: cannot verify reparse-point status: {p}\n"
+                    "This Python lacks Path.is_junction(); fail-closed on Windows.")
+            return False
+        try:
+            return bool(is_junc())
+        except OSError:
+            if sys.platform == "win32":
+                raise SystemExit(
+                    f"REFUSED: cannot verify reparse-point status: {p}\n"
+                    "I/O error during junction check; fail-closed on Windows.")
+            return False
 
     probe = path
     while True:
@@ -105,6 +117,24 @@ def new_run_dir(output_dir: str | Path) -> Path:
     resolved = path.resolve()
     # B04: refuse locations inside the repository tree.
     repo = _repo_root()
+    # B04 fix (round 3): also refuse new runs under known historical
+    # E2 evidence roots. Creating D:\e2e014-rerun-runtime\new-run would
+    # extend/overwrite legacy evidence. Any existing ancestor whose name
+    # marks a legacy E2 run blocks the path.
+    ancestor = resolved
+    while True:
+        # B04: check the name even for non-existent ancestors, so that
+        # creating "<tmp>/e2e014-rerun-runtime/new-run" is refused even
+        # when the legacy root does not exist here.
+        name = ancestor.name
+        if name.startswith("e2e014-") or name == "e2e014-rerun-runtime":
+            raise SystemExit(
+                f"REFUSED: path is under a historical E2 evidence root: {ancestor}\n"
+                "Create the run directory outside legacy evidence trees.")
+        parent = ancestor.parent
+        if parent == ancestor:
+            break
+        ancestor = parent
     try:
         resolved.relative_to(repo)
         raise SystemExit(
@@ -349,23 +379,53 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
     if not (date_from and date_to):
         summary["result"] = "SKIPPED_MISSING_DATE_RANGE"
         return summary
-    # B03: verify each call's archive by actually reading it back.
-    # A fabricated raw_reference (e.g. "ref/y") fails the read and can
-    # never yield PASS.
+    # B03: verify each call's archive by actually reading it back and
+    # confirming the archive belongs to THIS request (endpoint_or_tool +
+    # request_params binding). A fabricated raw_reference (e.g. "ref/y")
+    # fails the read; an archive from another request fails the binding
+    # check. Neither can yield PASS.
+    # Scope note: the full InformationNormalizer.normalize() chain
+    # (envelope -> normalized_data -> canonical Evidence) is covered by
+    # tests/test_information_archive_roundtrip.py. Phase C here verifies
+    # Provider -> archive integrity + request binding, which is the
+    # precondition for that chain.
     reader = ArchiveReader(run_dir / "phase_c")
 
-    def _verify_call(label, r):
+    def _verify_call(label, r, expected_tool, expected_stock, expected_params):
+        # B03: verify the archive belongs to THIS request, not just any
+        # archive with a valid hash. Check endpoint_or_tool and
+        # request_params binding in the archive metadata.
         info = {"status": r.status.value,
                 "archive_present": bool(r.raw_reference),
                 "archive_verified": False,
-                "archive_integrity": None}
+                "archive_integrity": None,
+                "binding_verified": False}
         if r.raw_reference and r.status in (ProviderStatus.AVAILABLE,
                                             ProviderStatus.NOT_AVAILABLE):
             try:
                 back = reader.read(r.raw_reference)
                 info["archive_integrity"] = back.get("integrity_status")
+                meta = back.get("metadata", {})
+                # Binding check 1: endpoint_or_tool ends with #{tool}.
+                # (Provider stores "{ENDPOINT}#{tool}".)
+                eot = meta.get("endpoint_or_tool", "")
+                tool_ok = eot.endswith("#" + expected_tool)
+                # Binding check 2: request_params["stock_id"] must match,
+                # and the nested tool params must contain our arguments.
+                params = meta.get("request_params", {})
+                nested = params.get("params", {})
+                # The tool-call arguments live under params.params.arguments.
+                args = nested.get("arguments", {}) if isinstance(nested, dict) else {}
+                params_ok = (
+                    params.get("stock_id") == expected_stock
+                    and all(args.get(k) == v for k, v in expected_params.items())
+                )
+                info["binding_tool_ok"] = tool_ok
+                info["binding_params_ok"] = params_ok
+                info["binding_verified"] = bool(tool_ok and params_ok)
                 info["archive_verified"] = (
-                    back.get("integrity_status") == "VERIFIED")
+                    back.get("integrity_status") == "VERIFIED"
+                    and info["binding_verified"])
             except Exception as exc:  # noqa: BLE001 - record, don't leak
                 info["archive_read_error"] = type(exc).__name__
         return info
@@ -381,7 +441,9 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
             "stock_id": stock_id, "tool": tool, "data_kind": kind,
             "arguments": {"bdate": date_from, "edate": date_to},
         })
-        results[label] = _verify_call(label, r)
+        results[label] = _verify_call(
+            label, r, expected_tool=tool, expected_stock=stock_id,
+            expected_params={"bdate": date_from, "edate": date_to})
     for view in ("profit", "balance", "cashflow"):
         r = info.fetch({
             "system_run_id": "e2win" + uuid.uuid4().hex,
@@ -390,7 +452,9 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
             "stock_id": stock_id, "tool": "tdx_api_data",
             "data_kind": "financial", "arguments": {"view": view},
         })
-        results["financial_" + view] = _verify_call(view, r)
+        results["financial_" + view] = _verify_call(
+            view, r, expected_tool="tdx_api_data", expected_stock=stock_id,
+            expected_params={"view": view})
     summary["calls"] = results
     # B03: PASS only if every business call genuinely succeeded AND its
     # archive reads back with VERIFIED integrity. AVAILABLE or

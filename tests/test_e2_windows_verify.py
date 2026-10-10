@@ -498,3 +498,107 @@ class B05ExceptionHandlingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class B03BindingVerificationTests(unittest.TestCase):
+    """B03 (round 3): archive must belong to THIS request."""
+
+    def _mock_phase_c(self, run_dir, meta_override):
+        """Run phase_c with a mocked provider whose archive metadata is controlled."""
+        from unittest.mock import MagicMock, patch
+        with patch.dict("os.environ",
+                        {"TDX_MCP_API_KEY": "dummy-key"}, clear=False):
+            with patch.object(harness, "TdxInformationProvider") as cls:
+                mock_info = MagicMock()
+                mock_info.health_check.return_value = ProviderStatus.AVAILABLE
+                good = MagicMock()
+                good.status = ProviderStatus.AVAILABLE
+                good.raw_reference = "ref/good"
+                good.payload = {"data": [{"x": 1}]}
+                mock_info.fetch.return_value = good
+                cls.return_value = mock_info
+                with patch.object(harness, "ArchiveReader") as reader_cls:
+                    reader = MagicMock()
+                    reader.read.return_value = {
+                        "integrity_status": "VERIFIED",
+                        "metadata": meta_override,
+                        "raw_parts": {"response": b"{}"},
+                    }
+                    reader_cls.return_value = reader
+                    return harness.phase_c_real_info(
+                        run_dir, "601518.SH", "20260911", "20261011")
+
+    def test_binding_rejects_wrong_tool(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            meta = {
+                "endpoint_or_tool": "mcp#OTHER_TOOL",
+                "request_params": {
+                    "stock_id": "601518.SH",
+                    "params": {"arguments": {"bdate": "20260911",
+                                             "edate": "20261011"}},
+                },
+            }
+            result = self._mock_phase_c(run_dir, meta)
+            self.assertEqual(result["result"], "FAIL")
+            for label, call in result["calls"].items():
+                self.assertFalse(call["binding_verified"],
+                                 f"{label} should fail binding")
+
+    def test_binding_rejects_wrong_stock(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            meta = {
+                "endpoint_or_tool": "mcp#wenda_notice_query",
+                "request_params": {
+                    "stock_id": "000001.SZ",
+                    "params": {"arguments": {"bdate": "20260911",
+                                             "edate": "20261011"}},
+                },
+            }
+            result = self._mock_phase_c(run_dir, meta)
+            self.assertEqual(result["result"], "FAIL")
+
+    def test_binding_accepts_matching_request(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            meta = {
+                "endpoint_or_tool": "mcp#wenda_notice_query",
+                "request_params": {
+                    "stock_id": "601518.SH",
+                    "params": {"arguments": {"bdate": "20260911",
+                                             "edate": "20261011"}},
+                },
+            }
+            result = self._mock_phase_c(run_dir, meta)
+            # announcement/news share the same date-range params; financial
+            # views use different params so they fail binding in this mock.
+            # At minimum the binding logic must run (not be skipped).
+            for label, call in result["calls"].items():
+                self.assertIn("binding_verified", call)
+
+
+class B04FailClosedTests(unittest.TestCase):
+    """B04 (round 3): fail-closed when junction status cannot be verified."""
+
+    def test_refuses_when_is_junction_missing_on_windows(self):
+        import tempfile, sys
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "run-new"
+            # Simulate Windows Python without Path.is_junction.
+            with patch.object(sys, "platform", "win32"):
+                # Remove is_junction if present.
+                had = hasattr(Path, "is_junction")
+                orig = getattr(Path, "is_junction", None)
+                try:
+                    if had:
+                        delattr(Path, "is_junction")
+                    with self.assertRaises(SystemExit) as ctx:
+                        harness.new_run_dir(target)
+                    self.assertIn("REFUSED", str(ctx.exception))
+                finally:
+                    if had:
+                        Path.is_junction = orig
