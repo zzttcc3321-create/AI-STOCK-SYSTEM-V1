@@ -66,10 +66,12 @@ isError=True+空通知 → 尾部已有逻辑判 NOT_AVAILABLE。
 - 初版新增 9 个测试：9/9 通过
 - 修复新增第 10 个测试 `test_wenda_empty_notice_mixed_with_unknown_prose_is_not_misreported`：
   两种块顺序均判 VALIDATION_FAILED，通过
-- tests/test_tdx_information.py 定向：111/111 通过
-- 全量回归（unittest discover）：819/819 通过，0 失败 0 错误
+- B02 新增第 11 个测试 `test_wenda_empty_json_with_unknown_prose_is_not_misreported`：
+  空 JSON + 未知散文混合（三种块顺序）均判 VALIDATION_FAILED，通过
+- tests/test_tdx_information.py 定向：112/112 通过
+- 全量回归（unittest discover）：820/820 通过，0 失败 0 错误（351s）
 - git diff --check：通过
-- 测试日志：/tmp/hi1_fix_regression.log（dev-box）
+- 测试日志：docs/hi1_b02_regression_820.log
 - 注：环境无 pytest（包源 DNS 失败无法安装），用 unittest 执行，
   与仓库既有测试框架一致
 
