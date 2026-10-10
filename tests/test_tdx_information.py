@@ -921,6 +921,17 @@ class ResponseNormalizationTests(unittest.TestCase):
                         self.assertEqual(result.status, status)
                         self.assertEqual(result.payload["data"], [])
 
+    def test_wenda_empty_notice_mixed_with_unknown_prose_is_not_misreported(self):
+        # Ruling #6: 空通知与未知业务文本混合 → 不得误报空 (must stay VALIDATION_FAILED)
+        empty = {"type": "text", "text": "暂无相关数据"}
+        prose = {"type": "text", "text": "今日市场综述：指数震荡上行……"}
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            for content in ([empty, prose], [prose, empty]):
+                with self.subTest(tool=tool, content=content):
+                    result = self.fetch_result({"content": content}, tool)
+                    self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+                    self.assertEqual(result.payload["data"], [])
+
     def test_text_app_metadata_stays_raw_only(self):
         body = {"type": "text", "text": "MOCK business markdown"}
         metadata = {"type": "text", "text": "MOCK App metadata", "_meta": {"ui": "MOCK"}}
