@@ -932,6 +932,23 @@ class ResponseNormalizationTests(unittest.TestCase):
                     self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
                     self.assertEqual(result.payload["data"], [])
 
+    def test_wenda_empty_json_with_unknown_prose_is_not_misreported(self):
+        # HI1-B02: 空 JSON 结果 {"data":[]} 与未知散文混合 → 不得误报空
+        # values=[[]] 时 data 为空，但有未分类文本，必须 fail-closed
+        empty = {"type": "text", "text": "暂无数据"}
+        prose = {"type": "text", "text": "今日市场综述……"}
+        empty_json = {"type": "text", "text": '{"data":[]}'}
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            for content in (
+                [empty, prose, empty_json],
+                [empty_json, prose, empty],
+                [prose, empty, empty_json],
+            ):
+                with self.subTest(tool=tool, content=content):
+                    result = self.fetch_result({"content": content}, tool)
+                    self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+                    self.assertEqual(result.payload["data"], [])
+
     def test_text_app_metadata_stays_raw_only(self):
         body = {"type": "text", "text": "MOCK business markdown"}
         metadata = {"type": "text", "text": "MOCK App metadata", "_meta": {"ui": "MOCK"}}
