@@ -521,7 +521,9 @@ class B03BindingVerificationTests(unittest.TestCase):
                     reader = MagicMock()
                     reader.read.return_value = {
                         "integrity_status": "VERIFIED",
-                        "metadata": meta_override,
+                        # B03 (round 4): real Sidecar nests these under
+                        # metadata["record"].
+                        "metadata": {"record": meta_override},
                         "raw_parts": {"response": b"{}"},
                     }
                     reader_cls.return_value = reader
@@ -535,8 +537,10 @@ class B03BindingVerificationTests(unittest.TestCase):
             meta = {
                 "endpoint_or_tool": "mcp#OTHER_TOOL",
                 "request_params": {
+                    "method": "tools/call",
                     "stock_id": "601518.SH",
-                    "params": {"arguments": {"bdate": "20260911",
+                    "params": {"name": "wenda_notice_query",
+                               "arguments": {"bdate": "20260911",
                                              "edate": "20261011"}},
                 },
             }
@@ -553,8 +557,10 @@ class B03BindingVerificationTests(unittest.TestCase):
             meta = {
                 "endpoint_or_tool": "mcp#wenda_notice_query",
                 "request_params": {
+                    "method": "tools/call",
                     "stock_id": "000001.SZ",
-                    "params": {"arguments": {"bdate": "20260911",
+                    "params": {"name": "wenda_notice_query",
+                               "arguments": {"bdate": "20260911",
                                              "edate": "20261011"}},
                 },
             }
@@ -568,18 +574,152 @@ class B03BindingVerificationTests(unittest.TestCase):
             meta = {
                 "endpoint_or_tool": "mcp#wenda_notice_query",
                 "request_params": {
+                    "method": "tools/call",
                     "stock_id": "601518.SH",
-                    "params": {"arguments": {"bdate": "20260911",
+                    "params": {"name": "wenda_notice_query",
+                               "arguments": {"bdate": "20260911",
                                              "edate": "20261011"}},
                 },
             }
             result = self._mock_phase_c(run_dir, meta)
-            # announcement/news share the same date-range params; financial
-            # views use different params so they fail binding in this mock.
-            # At minimum the binding logic must run (not be skipped).
+            # The mock archive holds wenda_notice_query metadata, so only
+            # the announcement call (expected_tool=wenda_notice_query)
+            # binds; the news call (expected_tool=wenda_news_query) must
+            # fail binding. Financial views use different params.
+            # B03 (round 4): strengthen -- matching requests must actually
+            # verify True, not merely contain the key.
             for label, call in result["calls"].items():
                 self.assertIn("binding_verified", call)
+            self.assertTrue(
+                result["calls"]["announcement"]["binding_verified"],
+                "matching announcement request must bind")
+            self.assertFalse(
+                result["calls"]["news"]["binding_verified"],
+                "news call must NOT bind to wenda_notice_query archive")
 
+
+class B03Round4RealArchiveBindingTests(unittest.TestCase):
+    """B03 (round 4): binding checks against REAL archive Sidecar structure.
+
+    Uses ArchiveWriter.write() to produce genuine archives and
+    ArchiveReader.read() (unmocked) to read them back, proving the
+    harness reads endpoint_or_tool / request_params from
+    metadata["record"] per the archive contract.
+    """
+
+    def _write_real_archive(self, writer, *, tool, method="tools/call",
+                            stock_id="601518.SH", arguments=None):
+        """Write a real archive mimicking _archive_response()."""
+        from evidence.archive_contracts import ArchiveIdentity
+        from datetime import datetime, timezone
+        import uuid as _uuid
+
+        if arguments is None:
+            arguments = {"bdate": "20260911", "edate": "20261011"}
+        run_id = "e2win" + _uuid.uuid4().hex
+        identity = ArchiveIdentity(run_id, "announcement",
+                                   _uuid.uuid4().hex, _uuid.uuid4().hex)
+        endpoint = "https://txmcp.tdx.com.cn:3001/txmcp#" + tool
+        receipt = writer.write(
+            identity=identity,
+            source="WORKBUDDY_TDX_MCP",
+            raw_parts={"response": b'{"ok": true}'},
+            endpoint_or_tool=endpoint,
+            request_params={"method": method,
+                            "params": {"name": tool, "arguments": arguments},
+                            "stock_id": stock_id,
+                            "request_day": "2026-10-11"},
+            request_timestamp=datetime.now(timezone.utc).isoformat(),
+            source_reference=endpoint,
+            evidence_id="RAW-" + _uuid.uuid4().hex,
+        )
+        return identity.uri
+
+    def _run_phase_c_with_real_reader(self, run_dir, uri, *,
+                                      stock_id="601518.SH",
+                                      date_from="20260911", date_to="20261011"):
+        """Run phase_c with mocked provider but a REAL ArchiveReader."""
+        from unittest.mock import MagicMock, patch
+        with patch.dict("os.environ",
+                        {"TDX_MCP_API_KEY": "dummy-key"}, clear=False):
+            with patch.object(harness, "TdxInformationProvider") as cls:
+                mock_info = MagicMock()
+                mock_info.health_check.return_value = ProviderStatus.AVAILABLE
+                good = MagicMock()
+                good.status = ProviderStatus.AVAILABLE
+                good.raw_reference = uri
+                good.payload = {"data": [{"x": 1}]}
+                mock_info.fetch.return_value = good
+                cls.return_value = mock_info
+                # NOTE: ArchiveReader is NOT mocked -- real readback.
+                return harness.phase_c_real_info(
+                    run_dir, stock_id, date_from, date_to)
+
+    def test_real_archive_matching_request_binds(self):
+        """Real archive for THIS request -> binding_verified True."""
+        import tempfile
+        from evidence import ArchiveWriter
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            writer = ArchiveWriter(run_dir / "phase_c")
+            uri = self._write_real_archive(writer, tool="wenda_notice_query")
+            result = self._run_phase_c_with_real_reader(run_dir, uri)
+            ann = result["calls"]["announcement"]
+            self.assertTrue(ann["binding_verified"],
+                            "real archive for matching request must bind")
+            self.assertTrue(ann["archive_verified"],
+                            "integrity + binding must both hold")
+            self.assertTrue(ann.get("binding_tool_ok"))
+            self.assertTrue(ann.get("binding_method_ok"))
+            self.assertTrue(ann.get("binding_name_ok"))
+            self.assertTrue(ann.get("binding_params_ok"))
+
+    def test_real_archive_wrong_tool_fails(self):
+        """Real archive for a DIFFERENT tool -> binding False, FAIL."""
+        import tempfile
+        from evidence import ArchiveWriter
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            writer = ArchiveWriter(run_dir / "phase_c")
+            uri = self._write_real_archive(writer, tool="wenda_news_query")
+            # phase_c expects wenda_notice_query for announcement;
+            # the archive holds wenda_news_query -> must fail binding.
+            result = self._run_phase_c_with_real_reader(run_dir, uri)
+            ann = result["calls"]["announcement"]
+            self.assertFalse(ann["binding_verified"],
+                             "archive for wrong tool must not bind")
+            self.assertEqual(result["result"], "FAIL")
+
+    def test_real_archive_wrong_stock_fails(self):
+        """Real archive for a DIFFERENT stock -> binding False, FAIL."""
+        import tempfile
+        from evidence import ArchiveWriter
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            writer = ArchiveWriter(run_dir / "phase_c")
+            uri = self._write_real_archive(writer, tool="wenda_notice_query",
+                                           stock_id="000001.SZ")
+            result = self._run_phase_c_with_real_reader(run_dir, uri)
+            ann = result["calls"]["announcement"]
+            self.assertFalse(ann["binding_verified"],
+                             "archive for wrong stock must not bind")
+            self.assertEqual(result["result"], "FAIL")
+
+    def test_real_archive_wrong_arguments_fails(self):
+        """Real archive with DIFFERENT arguments -> binding False, FAIL."""
+        import tempfile
+        from evidence import ArchiveWriter
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            writer = ArchiveWriter(run_dir / "phase_c")
+            uri = self._write_real_archive(
+                writer, tool="wenda_notice_query",
+                arguments={"bdate": "20200101", "edate": "20200131"})
+            result = self._run_phase_c_with_real_reader(run_dir, uri)
+            ann = result["calls"]["announcement"]
+            self.assertFalse(ann["binding_verified"],
+                             "archive with wrong arguments must not bind")
+            self.assertEqual(result["result"], "FAIL")
 
 class B04FailClosedTests(unittest.TestCase):
     """B04 (round 3): fail-closed when junction status cannot be verified."""

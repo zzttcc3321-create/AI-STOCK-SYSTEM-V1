@@ -405,22 +405,41 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
             try:
                 back = reader.read(r.raw_reference)
                 info["archive_integrity"] = back.get("integrity_status")
+                # B03 (round 4): ArchiveWriter.write() nests endpoint_or_tool
+                # and request_params under metadata["record"], not at the
+                # metadata top level. Read from the record per the archive
+                # contract (see evidence/archive_writer.py).
                 meta = back.get("metadata", {})
-                # Binding check 1: endpoint_or_tool ends with #{tool}.
+                record = meta.get("record", {}) if isinstance(meta, dict) else {}
+                if not isinstance(record, dict):
+                    record = {}
+                # Binding check 1: record.endpoint_or_tool ends with #{tool}.
                 # (Provider stores "{ENDPOINT}#{tool}".)
-                eot = meta.get("endpoint_or_tool", "")
-                tool_ok = eot.endswith("#" + expected_tool)
-                # Binding check 2: request_params["stock_id"] must match,
-                # and the nested tool params must contain our arguments.
-                params = meta.get("request_params", {})
-                nested = params.get("params", {})
-                # The tool-call arguments live under params.params.arguments.
-                args = nested.get("arguments", {}) if isinstance(nested, dict) else {}
-                params_ok = (
-                    params.get("stock_id") == expected_stock
-                    and all(args.get(k) == v for k, v in expected_params.items())
-                )
+                eot = record.get("endpoint_or_tool", "")
+                tool_ok = isinstance(eot, str) and eot.endswith("#" + expected_tool)
+                # Binding check 2: record.request_params contract --
+                # method, params.name, params.arguments, stock_id.
+                # (Provider stores {"method": ..., "params": {"name": ...,
+                # "arguments": {...}}, "stock_id": ..., "request_day": ...}.)
+                req_params = record.get("request_params", {})
+                if not isinstance(req_params, dict):
+                    req_params = {}
+                method_ok = req_params.get("method") == "tools/call"
+                nested = req_params.get("params", {})
+                if not isinstance(nested, dict):
+                    nested = {}
+                name_ok = nested.get("name") == expected_tool
+                # The tool-call arguments live under
+                # request_params.params.arguments.
+                args = nested.get("arguments", {})
+                if not isinstance(args, dict):
+                    args = {}
+                args_ok = all(args.get(k) == v for k, v in expected_params.items())
+                stock_ok = req_params.get("stock_id") == expected_stock
+                params_ok = method_ok and name_ok and args_ok and stock_ok
                 info["binding_tool_ok"] = tool_ok
+                info["binding_method_ok"] = method_ok
+                info["binding_name_ok"] = name_ok
                 info["binding_params_ok"] = params_ok
                 info["binding_verified"] = bool(tool_ok and params_ok)
                 info["archive_verified"] = (
