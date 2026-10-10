@@ -5,7 +5,9 @@ TASK_ID=AI-STOCK-V1-014-E2-HI1-NODATA-CLASSIFICATION
 基线 main=cfedc92408c52b8974b8ee7d59526dfd42c78a49
 分支 codex/014-e2-hi1-nodata-classification
 - commit 37a65508b234a80f9797515b43836c754428b215（初版，已 push）
-- commit 505d05d（第 6 条混合场景修复，已 push）← 当前 HEAD
+- commit 505d05d（第 6 条混合场景修复）
+- commit 2945a3b（HI1-B02 复合场景修复）
+- commit 2bfaa8c（Part A 更新）← 当前 HEAD
 执行模型：GPT-6.1 Sol + High（dev-box）
 
 ## 1. 范围（Scope）
@@ -31,7 +33,7 @@ TASK_ID=AI-STOCK-V1-014-E2-HI1-NODATA-CLASSIFICATION
 (3) _no_data() 本体未改；normalizer/information.py 未动；
     冻结合同、Provider 状态枚举、Schema、Migration 未动。
 
-### 修复（505d05d，总指挥裁决第 6 条）
+### 修复（505d05d + 2945a3b，总指挥裁决第 6 条及 HI1-B02）
 (4) 新增 `unclassified_text_seen` 标记：wenda 文本块若含非空行但未全匹配
     _no_data()（即未知散文），则标记为 True，使任何空通知声明失效。
 (5) fail-closed 门改为 `not (empty_notice and not unclassified_text_seen)`；
