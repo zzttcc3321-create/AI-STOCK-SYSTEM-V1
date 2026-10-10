@@ -1,0 +1,30 @@
+# V02 最终回归日志（总指挥补证要求）
+# 分支: codex/014-e2-windows-verify-harness
+# TEST_HEAD: 8968f7e682e2c4fc60efa909691714eb9c4545b2
+# 测试命令: PYTHONPATH=tests:. python3 -m unittest discover -s tests
+# 工作区状态: 干净（git status --porcelain 无输出）
+# git diff --check: PASS（exit 0，无输出）
+# 结果: Ran 864 tests in 352.736s / OK / EXIT_CODE=0
+
+===== 原始测试输出 =====
+............................................................................................................................................................................................................................................................................2026-10-10 19:40:34.396 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 19:40:34.396 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 19:40:36.395 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-10 19:40:43.963 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 19:40:43.963 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-10 19:40:46.973 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 19:40:46.973 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 19:40:46.973 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 864 tests in 352.736s
+
+OK
+{"overall": "PASS", "phases": [["A_offline", "PASS"]], "report": "/tmp/tmpl12_mtva/run/inner/verify_report.json"}
+{"overall": "INCOMPLETE", "phases": [["C_real_info", "BLOCKED_AUTH"]], "report": "/tmp/tmptxqw5l5d/run/inner/verify_report.json"}
+{"overall": "FAIL", "phases": [["A_offline", "FAIL"]], "report": "/tmp/tmpq4dv74mw/run/inner/verify_report.json"}
+{"overall": "FAIL", "phases": [["A_offline", "FAIL"]], "report": "/tmp/tmp9mjn8a3c/run/inner/verify_report.json"}
+{"overall": "FAIL", "phases": [["A_offline", "FAIL"]], "report": "/tmp/tmptnaouz31/run/inner/verify_report.json"}
+{"overall": "PASS", "phases": [["A_offline", "PASS"]], "report": "/tmp/tmpd5b2iozi/run/inner/verify_report.json"}
+EXIT_CODE=0
+TEST_HEAD=8968f7e682e2c4fc60efa909691714eb9c4545b2
