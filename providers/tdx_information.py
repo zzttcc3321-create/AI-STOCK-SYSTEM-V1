@@ -509,6 +509,11 @@ class TdxInformationProvider(Provider):
             if empty_notice and not unclassified_text_seen and not data:
                 raise _Failure(ProviderStatus.NOT_AVAILABLE, "TDX business result: no data")
             raise _Failure(ProviderStatus.UNAVAILABLE, "TDX tool reported a server error")
+        if unclassified_text_seen and not data:
+            # HI1-B02: unknown prose present with empty data.
+            # Cannot declare as explicitly empty; fail closed.
+            # (isError path above takes precedence)
+            raise _Failure(ProviderStatus.VALIDATION_FAILED)
         return data
 
     def fetch(self, request: Mapping[str, Any]) -> ProviderEnvelope:
