@@ -467,6 +467,11 @@ class TdxInformationProvider(Provider):
                         continue  # MCP App metadata is evidence, not business data.
                     if text.lstrip().startswith(("{", "[")):
                         raise _Failure(ProviderStatus.VALIDATION_FAILED) from None
+                    if tool in ("wenda_notice_query", "wenda_news_query"):
+                        lines = [line.strip() for line in text.splitlines() if line.strip()]
+                        if lines and all(_no_data(line) for line in lines):
+                            empty_notice = True
+                        continue
                     if tool != "tdx_ai_listening":
                         continue
                     # App metadata is evidence, not a business article.
@@ -486,7 +491,9 @@ class TdxInformationProvider(Provider):
                     if not any(name in value for name in ("data", "response", "isError", "ok", "code")):
                         continue  # Unrecognized JSON/App metadata is raw-only.
                 values.append(_business_data(value))
-            if content and not values:
+            if (content and not values and not empty_notice
+                    and not (tool in ("wenda_notice_query", "wenda_news_query")
+                             and result.get("isError") is True)):
                 raise _Failure(ProviderStatus.VALIDATION_FAILED)
             nonempty = [value for value in values if value]
             data = nonempty[0] if len(nonempty) == 1 else [
