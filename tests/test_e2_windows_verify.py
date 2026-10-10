@@ -151,5 +151,256 @@ class NoDatabaseTests(unittest.TestCase):
             self.assertIn("git_head", report)
 
 
+
+
+class B01TimestampOrderingTests(unittest.TestCase):
+    """B01 regression: `now` must be captured AFTER fetch() returns.
+
+    fetch() fills snapshot_timestamp when the HTTP response is parsed.
+    A `now` taken before fetch would be earlier than snapshot_timestamp,
+    and freshness() would reject it as a future timestamp.
+    """
+
+    def test_now_captured_after_fetch(self):
+        """utc_now() must be called after provider.fetch() returns."""
+        import datetime
+        call_order = []
+        t_fetch = datetime.datetime(2026, 10, 11, 0, 0, 5,
+                                    tzinfo=datetime.timezone.utc)
+
+        def fake_utc_now():
+            call_order.append("utc_now")
+            return t_fetch  # now >= snapshot_timestamp: no future-timestamp error
+
+        def fake_fetch(request):
+            call_order.append("fetch")
+            result = MagicMock()
+            result.status = ProviderStatus.AVAILABLE
+            result.raw_reference = "ref/123"
+            return result
+
+        captured = {}
+
+        def fake_make_envelope(result, *, mode, units, now, stale_after):
+            captured["now"] = now
+            # Simulate what the real make_envelope does with freshness:
+            # it must not see now < snapshot_timestamp.
+            return {"request_id": "req-123", "snapshot": {}}
+
+        def fake_materialize(packet, evidence_root):
+            return {"ok": True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            with patch.object(harness, "utc_now", side_effect=fake_utc_now), \
+                 patch.object(harness, "TdxLocalHttpProvider") as mock_cls, \
+                 patch.object(harness, "make_envelope",
+                              side_effect=fake_make_envelope), \
+                 patch.object(harness, "materialize",
+                              side_effect=fake_materialize):
+                mock_provider = MagicMock()
+                mock_provider.fetch.side_effect = fake_fetch
+                mock_cls.return_value = mock_provider
+                # Patch the internal helpers phase_b uses for checks
+                with patch.object(harness, "check_numeric_snapshot",
+                                  return_value={"all_ok": True}), \
+                     patch.object(harness, "check_raw_hash",
+                                  return_value={"hash_match": True}):
+                    result = harness.phase_b_real_quote(run_dir, "601518.SH")
+
+            # fetch must come before utc_now in the fixed code
+            self.assertEqual(call_order[0], "fetch")
+            self.assertIn("utc_now", call_order)
+            self.assertLess(call_order.index("fetch"),
+                            call_order.index("utc_now"))
+
+    def test_old_ordering_would_fail_freshness(self):
+        """Sanity: if now < snapshot_timestamp, freshness rejects it."""
+        import datetime
+        from bridge.contracts import freshness
+        t_snapshot = datetime.datetime(2026, 10, 11, 0, 0, 5,
+                                       tzinfo=datetime.timezone.utc)
+        t_now_early = datetime.datetime(2026, 10, 11, 0, 0, 0,
+                                        tzinfo=datetime.timezone.utc)
+        # freshness should reject a snapshot timestamp in the future
+        # relative to now (this is the B01 bug scenario).
+        with self.assertRaises(Exception):
+            freshness(t_snapshot.isoformat(), now=t_now_early,
+                      stale_after=300.0)
+
+
+class B02OverallStatusTests(unittest.TestCase):
+    """B02 regression: blocked/skipped phases must not yield overall PASS.
+
+    NO_SILENT_DEGRADATION: overall PASS requires every phase to truly pass.
+    """
+
+    def test_blocked_auth_gives_incomplete_not_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            # info mode without API key -> Phase C BLOCKED_AUTH
+            with patch.dict("os.environ", {}, clear=False):
+                import os
+                os.environ.pop("TDX_MCP_API_KEY", None)
+                rc = harness.main(["--output-dir", str(run_dir / "inner"),
+                                   "--mode", "info"])
+            # Must NOT be 0 (PASS). INCOMPLETE -> exit code 2.
+            self.assertEqual(rc, 2)
+            report = json.loads((run_dir / "inner" / "verify_report.json")
+                                .read_text(encoding="utf-8"))
+            self.assertEqual(report["overall"], "INCOMPLETE")
+            self.assertNotEqual(report["overall"], "PASS")
+
+    def test_all_pass_gives_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            rc = harness.main(["--output-dir", str(run_dir / "inner"),
+                               "--mode", "offline"])
+            self.assertEqual(rc, 0)
+            report = json.loads((run_dir / "inner" / "verify_report.json")
+                                .read_text(encoding="utf-8"))
+            self.assertEqual(report["overall"], "PASS")
+
+    def test_fail_phase_gives_fail(self):
+        # Simulate a FAIL phase via direct main() logic check.
+        # We patch phase_a_offline to return FAIL.
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            with patch.object(harness, "phase_a_offline",
+                              return_value={"phase": "A_offline",
+                                            "result": "FAIL"}):
+                rc = harness.main(["--output-dir", str(run_dir / "inner"),
+                                   "--mode", "offline"])
+            self.assertEqual(rc, 1)
+            report = json.loads((run_dir / "inner" / "verify_report.json")
+                                .read_text(encoding="utf-8"))
+            self.assertEqual(report["overall"], "FAIL")
+
+
+
+
+class B03RealValueTests(unittest.TestCase):
+    """B03: assertions must be based on real return values, never hardcoded."""
+
+    def test_phase_a_canonical_check_uses_real_values(self):
+        """canonical_restricted must reflect materialize() output."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            result = harness.phase_a_offline(run_dir)
+            checks = result["checks"]
+            # The diagnostic fields must carry the REAL values...
+            self.assertIn("canonical_data_return", checks)
+            self.assertIn("canonical_data_persisted", checks)
+            # ...and canonical_restricted must be derived from them.
+            self.assertEqual(
+                checks["canonical_restricted"],
+                checks["canonical_data_return"] == []
+                and checks["canonical_data_persisted"] == [],
+            )
+
+    def test_phase_c_fails_when_calls_fail(self):
+        """phase_c must not PASS when business calls fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            with patch.dict("os.environ",
+                            {"TDX_MCP_API_KEY": "dummy-key"}, clear=False):
+                with patch.object(harness, "TdxInformationProvider") as cls:
+                    mock_info = MagicMock()
+                    # Control plane OK...
+                    mock_info.health_check.return_value = \
+                        ProviderStatus.AVAILABLE
+                    # ...but business calls AUTH_FAILED.
+                    bad = MagicMock()
+                    bad.status = ProviderStatus.AUTH_FAILED
+                    bad.raw_reference = "ref/x"
+                    mock_info.fetch.return_value = bad
+                    cls.return_value = mock_info
+                    result = harness.phase_c_real_info(
+                        run_dir, "601518.SH", "20260911", "20261011")
+            self.assertEqual(result["result"], "FAIL")
+            self.assertIn("failed_calls", result)
+            self.assertTrue(len(result["failed_calls"]) > 0)
+
+    def test_phase_c_passes_when_calls_succeed(self):
+        """phase_c PASS requires real successful calls."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            with patch.dict("os.environ",
+                            {"TDX_MCP_API_KEY": "dummy-key"}, clear=False):
+                with patch.object(harness, "TdxInformationProvider") as cls:
+                    mock_info = MagicMock()
+                    mock_info.health_check.return_value = \
+                        ProviderStatus.AVAILABLE
+                    good = MagicMock()
+                    good.status = ProviderStatus.AVAILABLE
+                    good.raw_reference = "ref/y"
+                    mock_info.fetch.return_value = good
+                    cls.return_value = mock_info
+                    result = harness.phase_c_real_info(
+                        run_dir, "601518.SH", "20260911", "20261011")
+            self.assertEqual(result["result"], "PASS")
+            self.assertEqual(result["failed_calls"], {})
+
+
+class B04PathBoundaryTests(unittest.TestCase):
+    """B04: new_run_dir must refuse unsafe locations."""
+
+    def test_refuses_repo_internal_path(self):
+        repo_root = Path(harness.__file__).resolve().parents[1]
+        target = repo_root / "tmp-e2-should-not-exist-xyz"
+        # Ensure it doesn't exist (we refuse before creating).
+        self.assertFalse(target.exists())
+        with self.assertRaises(SystemExit) as ctx:
+            harness.new_run_dir(target)
+        self.assertIn("REFUSED", str(ctx.exception))
+
+    def test_refuses_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "real-target"
+            real.mkdir()
+            link = Path(tmp) / "link-dir"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlinks not supported on this platform")
+            # The symlink itself doesn't exist as a dir yet; new_run_dir
+            # should refuse because a component is a symlink.
+            # Note: path.exists() follows symlinks, so use a subpath.
+            sub = link / "run-new"
+            with self.assertRaises(SystemExit) as ctx:
+                harness.new_run_dir(sub)
+            self.assertIn("symlink", str(ctx.exception).lower())
+
+    def test_accepts_tmp_isolated_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "isolated-run"
+            out = harness.new_run_dir(target)
+            self.assertTrue(out.is_dir())
+
+
+class B05ExceptionHandlingTests(unittest.TestCase):
+    """B05: phase exceptions must still produce a report with FAIL."""
+
+    def test_phase_exception_produces_fail_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = harness.new_run_dir(Path(tmp) / "run")
+            def boom(_run_dir):
+                raise RuntimeError("simulated phase crash")
+            with patch.object(harness, "phase_a_offline",
+                              side_effect=boom):
+                rc = harness.main(["--output-dir", str(run_dir / "inner"),
+                                   "--mode", "offline"])
+            # Non-zero exit, report exists, phase marked FAIL with error.
+            self.assertNotEqual(rc, 0)
+            report_path = run_dir / "inner" / "verify_report.json"
+            self.assertTrue(report_path.exists())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["overall"], "FAIL")
+            phase = report["phases"][0]
+            self.assertEqual(phase["result"], "FAIL")
+            self.assertEqual(phase["error_type"], "RuntimeError")
+            self.assertIn("simulated phase crash", phase["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

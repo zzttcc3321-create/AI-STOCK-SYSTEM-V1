@@ -67,14 +67,40 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _repo_root() -> Path:
+    """Repository root (parent of tools/)."""
+    return Path(__file__).resolve().parents[1]
+
+
 def new_run_dir(output_dir: str | Path) -> Path:
-    """Create the isolated run directory. Refuse if it already exists."""
+    """Create the isolated run directory. Refuse unsafe locations."""
     path = Path(output_dir)
     if path.exists():
         raise SystemExit(
             f"REFUSED: output directory already exists: {path}\n"
             "Specify a new, non-existent directory to avoid overwriting "
             "historical evidence.")
+    # B04: refuse symlinks / Windows reparse points anywhere in the path.
+    probe = path
+    while True:
+        if probe.is_symlink():
+            raise SystemExit(
+                f"REFUSED: path component is a symlink: {probe}\n"
+                "Symlinks could redirect evidence outside the isolated dir.")
+        parent = probe.parent
+        if parent == probe:
+            break
+        probe = parent
+    resolved = path.resolve()
+    # B04: refuse locations inside the repository tree.
+    repo = _repo_root()
+    try:
+        resolved.relative_to(repo)
+        raise SystemExit(
+            f"REFUSED: output directory is inside the repository: {resolved}\n"
+            "Evidence must go to an isolated directory outside the repo.")
+    except ValueError:
+        pass  # not inside repo: acceptable
     path.mkdir(parents=True)
     return path.resolve()
 
@@ -152,14 +178,32 @@ def phase_a_offline(run_dir: Path) -> dict:
                            now=now, stale_after=300.0)
     out = materialize(packet, run_dir / "phase_a")
     evidence_dir = run_dir / "phase_a" / "offline" / "phase_a" / packet["request_id"]
+    # B03: verify canonical restriction from the real materialize() return
+    # value and the written evidence.json - never hardcode True.
+    canonical_data = out.get("canonical_data")
+    evidence_json_path = evidence_dir / "evidence.json"
+    evidence_canonical = None
+    if evidence_json_path.exists():
+        try:
+            evidence_canonical = json.loads(
+                evidence_json_path.read_text(encoding="utf-8")
+            ).get("canonical_data")
+        except (json.JSONDecodeError, OSError):
+            evidence_canonical = "UNREADABLE"
     checks = {
         "envelope_built": True,
-        "materialized": True,
+        "materialized": isinstance(out, dict),
         "raw_json_exists": (evidence_dir / "raw.json").exists(),
-        "evidence_json_exists": (evidence_dir / "evidence.json").exists(),
+        "evidence_json_exists": evidence_json_path.exists(),
         "numeric_ok": check_numeric_snapshot(snapshot)["all_ok"],
         "units_empty": packet["units"] == {},
-        "canonical_restricted": True,  # empty units => no VERIFIED canonical
+        # Empty units must yield no VERIFIED canonical: the real return
+        # value and the persisted evidence.json must both show empty list.
+        "canonical_restricted": (
+            canonical_data == [] and evidence_canonical == []
+        ),
+        "canonical_data_return": canonical_data,
+        "canonical_data_persisted": evidence_canonical,
     }
     # Status distinction contract: the three failure statuses must remain
     # distinct values and must never be conflated.
@@ -168,13 +212,19 @@ def phase_a_offline(run_dir: Path) -> dict:
         ProviderStatus.NOT_AVAILABLE.value,
         ProviderStatus.VALIDATION_FAILED.value,
     }) == 3
-    return {"phase": "A_offline", "result": "PASS" if all(checks.values()) else "FAIL",
+    # B03: gate only on boolean contract checks; diagnostic fields
+    # (canonical_data_return/_persisted) carry real values for the report
+    # but must not affect the PASS/FAIL computation via falsy [].
+    boolean_checks = {k: v for k, v in checks.items()
+                      if k not in ("canonical_data_return",
+                                   "canonical_data_persisted")}
+    return {"phase": "A_offline",
+            "result": "PASS" if all(boolean_checks.values()) else "FAIL",
             "checks": checks}
 
 
 def phase_b_real_quote(run_dir: Path, stock_id: str) -> dict:
     """Phase B: real TDX quote through the frozen pipeline."""
-    now = utc_now()
     run_id = "e2win" + uuid.uuid4().hex
     provider = TdxLocalHttpProvider(
         archive_writer=ArchiveWriter(run_dir / "phase_b" / "realtime"))
@@ -187,6 +237,11 @@ def phase_b_real_quote(run_dir: Path, stock_id: str) -> dict:
         "evidence_id": uuid.uuid4().hex,
     }
     result = provider.fetch(request)
+    # B01 fix: capture `now` AFTER fetch() returns. fetch() fills
+    # snapshot_timestamp when the HTTP response is parsed, so a `now`
+    # taken before fetch would be earlier than snapshot_timestamp and
+    # freshness() would reject it as a future timestamp.
+    now = utc_now()
     summary: dict = {
         "phase": "B_real_quote",
         "provider_status": result.status.value,
@@ -219,10 +274,30 @@ def phase_b_real_quote(run_dir: Path, stock_id: str) -> dict:
             hashlib.sha256(reread).hexdigest() == payload["raw_response_hash"])
     else:
         summary["raw_readback_hash_match"] = False
+    # B03: verify evidence.json canonical content from the real file,
+    # not just its existence. Empty units => canonical_data must be [].
+    evidence_json_path = evidence_dir / "evidence.json"
+    summary["evidence_canonical_data"] = None
+    summary["evidence_canonical_restricted"] = False
+    if evidence_json_path.exists():
+        try:
+            persisted = json.loads(
+                evidence_json_path.read_text(encoding="utf-8"))
+            summary["evidence_canonical_data"] = persisted.get("canonical_data")
+            summary["evidence_canonical_restricted"] = (
+                summary["evidence_canonical_data"] == [])
+        except (json.JSONDecodeError, OSError) as exc:
+            summary["evidence_read_error"] = type(exc).__name__
+    # Also check the in-memory materialize() return value.
+    summary["materialize_canonical_data"] = out.get("canonical_data")
+    summary["materialize_canonical_restricted"] = (
+        summary["materialize_canonical_data"] == [])
     ok = (summary["numeric"]["all_ok"]
           and summary["raw_hash"]["hash_match"]
           and summary["raw_readback_hash_match"]
-          and summary["evidence_json_exists"])
+          and summary["evidence_json_exists"]
+          and summary["evidence_canonical_restricted"]
+          and summary["materialize_canonical_restricted"])
     summary["result"] = "PASS" if ok else "FAIL"
     return summary
 
@@ -271,7 +346,23 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
         results["financial_" + view] = {"status": r.status.value,
                                         "archive_present": bool(r.raw_reference)}
     summary["calls"] = results
-    summary["result"] = "PASS"
+    # B03: PASS only if every business call genuinely succeeded.
+    # AVAILABLE or NOT_AVAILABLE (explicit nodata classification) with an
+    # archive are acceptable. AUTH_FAILED / VALIDATION_FAILED / missing
+    # archive are real failures, never silently passed.
+    acceptable = {"AVAILABLE", "NOT_AVAILABLE"}
+    failed_calls = {
+        label: info for label, info in results.items()
+        if info["status"] not in acceptable or not info["archive_present"]
+    }
+    summary["failed_calls"] = failed_calls
+    if failed_calls:
+        summary["result"] = "FAIL"
+        summary["note"] = (
+            f"{len(failed_calls)} business call(s) did not succeed: "
+            + ", ".join(sorted(failed_calls)))
+    else:
+        summary["result"] = "PASS"
     return summary
 
 
@@ -300,24 +391,47 @@ def main(argv: list[str] | None = None) -> int:
         "credential_persisted": False,
     }
     phases = []
+    # B05: a phase raising an exception must still produce a complete
+    # failure report (never a missing verify_report.json) with a non-zero
+    # exit code, without masking the real error.
+    def _run_phase(name, fn, *a, **k):
+        try:
+            return fn(*a, **k)
+        except SystemExit:
+            raise
+        except Exception as exc:  # noqa: BLE001 - report, don't mask
+            return {"phase": name, "result": "FAIL",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:500]}
     if args.mode in ("offline", "all"):
-        phases.append(phase_a_offline(run_dir))
+        phases.append(_run_phase("A_offline", phase_a_offline, run_dir))
     if args.mode in ("quote", "all"):
-        phases.append(phase_b_real_quote(run_dir, args.stock_id))
+        phases.append(_run_phase("B_real_quote", phase_b_real_quote,
+                                 run_dir, args.stock_id))
     if args.mode in ("info", "all"):
-        phases.append(phase_c_real_info(run_dir, args.stock_id,
-                                        args.date_from, args.date_to))
+        phases.append(_run_phase("C_real_info", phase_c_real_info, run_dir,
+                                 args.stock_id, args.date_from, args.date_to))
     report["phases"] = phases
-    overall = all(p.get("result") in ("PASS", "SKIPPED_NOT_AVAILABLE",
-                                      "BLOCKED_AUTH", "SKIPPED_MISSING_DATE_RANGE")
-                  for p in phases)
-    report["overall"] = "PASS" if overall else "FAIL"
+    # B02 fix (NO_SILENT_DEGRADATION): a blocked or skipped phase must never
+    # be reported as an overall PASS. Only a run where every executed phase
+    # truly passed may return PASS / exit 0.
+    results = [p.get("result") for p in phases]
+    if all(r == "PASS" for r in results):
+        overall_status, exit_code = "PASS", 0
+    elif any(r == "FAIL" for r in results):
+        overall_status, exit_code = "FAIL", 1
+    else:
+        # At least one phase was blocked/skipped (e.g. BLOCKED_AUTH,
+        # SKIPPED_NOT_AVAILABLE, SKIPPED_MISSING_DATE_RANGE) and none failed.
+        # The verification is incomplete: report it honestly, never claim PASS.
+        overall_status, exit_code = "INCOMPLETE", 2
+    report["overall"] = overall_status
     (run_dir / "verify_report.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({"overall": report["overall"],
                       "phases": [(p["phase"], p["result"]) for p in phases],
                       "report": str(run_dir / "verify_report.json")}))
-    return 0 if overall else 1
+    return exit_code
 
 
 if __name__ == "__main__":
