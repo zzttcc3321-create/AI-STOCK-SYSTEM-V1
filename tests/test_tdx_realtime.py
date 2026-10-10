@@ -16,7 +16,8 @@ from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
 from bridge.contracts import (
-    FIELDS, MAX_PACKET_BYTES, freshness, json_bytes, packet_hash, validate_packet,
+    BOOK, FIELDS, MAX_PACKET_BYTES, SCALARS, freshness, json_bytes, map_snapshot,
+    packet_hash, validate_packet,
 )
 from bridge.ingress import IngressError, IngressStore, handler_for
 from bridge.pipeline import ProcessLock, materialize
@@ -36,6 +37,15 @@ SNAPSHOT = {
     "Sellp": [4.21, 0, 0, 0, 0], "Sellv": [300, 0, 0, 0, 0],
     "Inside": 12, "Outside": 24, "NowVol": 3, "TickDiff": 0,
     "ZAFPre3": 0, "Zangsu": 0, "XsFlag": 0, "ItemNum": 1,
+}
+# Entirely fictional numeric text; these are not user prices or holdings.
+STRING_SNAPSHOT = {
+    "Now": "4.20", "LastClose": "4.10", "Open": "4.12", "Max": "4.30", "Min": "4.00",
+    "Volume": "121746", "Amount": "5184900", "Average": "4.20",
+    "Buyp": ["4.19", "0.00", "0.00", "0.00", "0.00"],
+    "Buyv": ["200", "0", "0", "0", "0"],
+    "Sellp": ["4.21", "0.00", "0.00", "0.00", "0.00"],
+    "Sellv": ["300", "0", "0", "0", "0"],
 }
 TEST_ENV = {"TDX_INGRESS_TOKEN": "TEST_TOKEN_ONLY", "REALTIME_MISSING_AFTER_SECONDS": "1000"}
 
@@ -125,6 +135,69 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result.payload["snapshot"], expected)
         self.assertIsNone(result.provider_timestamp)
 
+    def test_string_numeric_snapshot_mapping_and_packet_validation(self):
+        result, local = fetch_result(transport=FakeLocal(STRING_SNAPSHOT))
+        self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+        self.assertTrue(TdxLocalHttpProvider(local, environ={}).validate_contract(result).valid)
+        expected = {
+            "now": 4.2, "last_close": 4.1, "open": 4.12, "high": 4.3, "low": 4.0,
+            "volume": 121746, "amount": 5184900, "average": 4.2,
+            "bid_prices": [4.19, 0.0, 0.0, 0.0, 0.0], "bid_volumes": [200, 0, 0, 0, 0],
+            "ask_prices": [4.21, 0.0, 0.0, 0.0, 0.0], "ask_volumes": [300, 0, 0, 0, 0],
+        }
+        self.assertEqual(result.payload["snapshot"], expected)
+        for name, value in expected.items():
+            actual = result.payload["snapshot"][name]
+            if isinstance(value, list):
+                self.assertEqual([type(item) for item in actual], [type(item) for item in value])
+            else:
+                self.assertIs(type(actual), type(value))
+        raw = json.loads(base64.b64decode(result.payload["raw_response_b64"]))
+        original = deepcopy(raw)
+        self.assertEqual(map_snapshot(raw), expected)
+        self.assertEqual(raw, original)
+        value = make_envelope(result, mode="AUTO", units={}, now=NOW, stale_after=300)
+        decoded = json.loads(json_bytes(value))
+        validate_packet(decoded, now=NOW)
+        self.assertEqual(decoded["snapshot"], map_snapshot(raw))
+
+    def test_numeric_text_lexical_forms_and_native_types(self):
+        # Fictional values exercise decimal, exponent and integer precision rules.
+        cases = (("  4.2  ", 4.2), ("2.80", 2.8), ("121746", 121746),
+                 ("1.2e3", 1200.0), ("+1.2E+3", 1200.0), ("1e-3", 0.001),
+                 (".5", 0.5), ("+.5", 0.5), ("+42", 42), ("  42  ", 42),
+                 ("0", 0), ("-0", 0), ("-0.0", -0.0),
+                 ("9007199254740993", 9007199254740993), (42, 42), (4.2, 4.2))
+        for text, expected in cases:
+            for name, field in {**SCALARS, **BOOK}.items():
+                with self.subTest(text=text, field=field):
+                    change = [text] * 5 if name in BOOK else text
+                    result, _ = fetch_result(transport=FakeLocal({field: change}))
+                    self.assertEqual(result.status, ProviderStatus.AVAILABLE)
+                    actual = result.payload["snapshot"][name]
+                    values = actual if name in BOOK else [actual]
+                    for value in values:
+                        self.assertEqual(value, expected)
+                        self.assertIs(type(value), type(expected))
+
+    def test_invalid_numeric_text_and_bools_raise_valueerror(self):
+        invalid = ("", "   ", "NaN", "Infinity", "-1", "1,234", "0x10", True, False,
+                   "-1e3", "1e309", "1_000", "1.", "1e", "1\n2")
+        for text in invalid:
+            for name, field in {**SCALARS, **BOOK}.items():
+                for level in range(5) if name in BOOK else (None,):
+                    with self.subTest(text=text, field=field, level=level):
+                        change = text
+                        if name in BOOK:
+                            change = list(SNAPSHOT[field])
+                            change[level] = text
+                        raw = {"result": {"ErrorId": "0", **SNAPSHOT, field: change}}
+                        with self.assertRaises(ValueError):
+                            map_snapshot(raw)
+                        result, _ = fetch_result(transport=FakeLocal({field: change}))
+                        self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+                        self.assertIsNone(result.payload["snapshot"])
+
     def test_exact_rpc_request_and_timeouts(self):
         _, local = fetch_result()
         body, timeouts = local.calls[0]
@@ -163,7 +236,7 @@ class ProviderTests(unittest.TestCase):
 
     def test_malformed_missing_nonnumeric_and_invalid_book(self):
         for changes in ({"Now": None}, {"Volume": "lots"}, {"Amount": -1}, {"Open": True},
-                        {"Buyp": [1]}, {"Buyv": [1, 2, 3, 4, "5"]}):
+                        {"Buyp": [1]}, {"Buyv": [1, 2, 3, 4, "lots"]}):
             result, _ = fetch_result(transport=FakeLocal(changes))
             self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
             self.assertIsNone(result.payload["snapshot"])
@@ -293,6 +366,23 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(canonical["freshness"], "UNKNOWN")
         self.assertFalse(self.store.current("601518.SH")["usable_for_realtime"])
         self.assertNotIn("TEST_TOKEN_ONLY", "".join(p.read_text() for p in self.root.rglob("*.json")))
+
+    def test_string_snapshot_preserves_raw_bytes_hash_and_evidence(self):
+        raw = {"jsonrpc": "2.0", "id": "request_1",
+               "result": {"ErrorId": "0", **SNAPSHOT, **STRING_SNAPSHOT}}
+        data = b" \n" + json_bytes(raw) + b"\r\n"
+        value = packet(transport=FakeLocal(raw=data))
+        self.assertEqual(value["realtime_quote_status"], "REALTIME")
+        self.assertEqual(base64.b64decode(value["raw_response_b64"]), data)
+        self.assertEqual(value["raw_response_hash"], hashlib.sha256(data).hexdigest())
+        validate_packet(json.loads(json_bytes(value)), now=NOW)
+        self.assertEqual(self.accept(value)["freshness"], "REALTIME")
+        receipt = json.loads(self.receipts()[0].read_bytes())
+        evidence = receipt["result"]["evidence"]
+        self.assertEqual(Path(evidence["raw_response_path"]).read_bytes(), data)
+        self.assertEqual(evidence["raw_response_hash"], value["raw_response_hash"])
+        self.assertEqual(json.loads(data)["result"]["Now"], "4.20")
+        self.assertEqual(json.loads(data)["result"]["Volume"], "121746")
 
     def test_units_missing_not_guessed_and_wrong_units_rejected(self):
         self.accept(packet())

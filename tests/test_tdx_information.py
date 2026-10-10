@@ -845,6 +845,110 @@ class ResponseNormalizationTests(unittest.TestCase):
         self.assertEqual(result.status, ProviderStatus.AVAILABLE)
         self.assertEqual(result.payload["data"], [body])
 
+    def test_wenda_notice_explicit_empty_text_is_not_available(self):
+        response = {"content": [{"type": "text", "text": "暂无相关数据"}]}
+        result = self.fetch_result(response, "wenda_notice_query")
+        self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+        self.assertEqual(result.payload["data"], [])
+        self.assertEqual(json.loads(result.payload["evidence"][-1]["raw_bytes"])["result"], response)
+
+    def test_wenda_news_explicit_empty_text_is_not_available(self):
+        response = {"content": [{"type": "text", "text": "no data available"}]}
+        result = self.fetch_result(response, "wenda_news_query")
+        self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+        self.assertEqual(result.payload["data"], [])
+        self.assertEqual(json.loads(result.payload["evidence"][-1]["raw_bytes"])["result"], response)
+
+    def test_wenda_notice_prose_remains_validation_failure(self):
+        result = self.fetch_result({"content": [
+            {"type": "text", "text": "今日市场综述：……"}]}, "wenda_notice_query")
+        self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+        self.assertEqual(result.payload["data"], [])
+
+    def test_wenda_news_prose_with_iserror_is_unavailable(self):
+        result = self.fetch_result({"isError": True, "content": [
+            {"type": "text", "text": "今日市场综述……"}]}, "wenda_news_query")
+        self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
+        self.assertEqual(result.payload["data"], [])
+
+    def test_wenda_multiline_empty_text_requires_all_nonempty_lines_to_match(self):
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            with self.subTest(tool=tool):
+                result = self.fetch_result({"content": [{"type": "text", "text":
+                    " \n 暂无相关数据。 \n\n no data available! \n "}]}, tool)
+                self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+                self.assertEqual(result.payload["data"], [])
+
+    def test_wenda_nonmatching_lines_cannot_be_classified_as_empty(self):
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            for text in ("暂无相关数据\n今日市场综述……", "文章提及暂无数据，但包含实际资讯内容。",
+                         "# 今日市场综述\n暂无相关数据", "**暂无相关数据**", " \n\t ",
+                         "[MCP App metadata]\n暂无相关数据", "{暂无相关数据"):
+                with self.subTest(tool=tool, text=text):
+                    result = self.fetch_result({"content": [{"type": "text", "text": text}]}, tool)
+                    self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+                    self.assertEqual(result.payload["data"], [])
+
+    def test_wenda_iserror_with_explicit_empty_text_is_not_available(self):
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            with self.subTest(tool=tool):
+                result = self.fetch_result({"isError": True, "content": [
+                    {"type": "text", "text": "暂无相关数据"}]}, tool)
+                self.assertEqual(result.status, ProviderStatus.NOT_AVAILABLE)
+                self.assertEqual(result.payload["data"], [])
+                self.assertIn("no data", result.error.message)
+
+    def test_wenda_empty_text_does_not_hide_iserror_with_business_data(self):
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            with self.subTest(tool=tool):
+                result = self.fetch_result({"isError": True, "content": [
+                    {"type": "text", "text": "暂无相关数据"},
+                    {"type": "text", "text": json.dumps({"data": ROWS})}]}, tool)
+                self.assertEqual(result.status, ProviderStatus.UNAVAILABLE)
+                self.assertEqual(result.payload["data"], [])
+
+    def test_wenda_empty_text_does_not_hide_business_errors_or_invalid_content(self):
+        empty = {"type": "text", "text": "暂无相关数据"}
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            for text, status in (
+                    (json.dumps({"ok": False, "message": "服务端拒绝"}), ProviderStatus.UNAVAILABLE),
+                    (json.dumps({"data": ROWS, "response": []}), ProviderStatus.VALIDATION_FAILED),
+                    ('{"data":BROKEN}', ProviderStatus.VALIDATION_FAILED)):
+                invalid = {"type": "text", "text": text}
+                for content in ([empty, invalid], [invalid, empty]):
+                    with self.subTest(tool=tool, content=content):
+                        result = self.fetch_result({"content": content}, tool)
+                        self.assertEqual(result.status, status)
+                        self.assertEqual(result.payload["data"], [])
+
+    def test_wenda_empty_notice_mixed_with_unknown_prose_is_not_misreported(self):
+        # Ruling #6: 空通知与未知业务文本混合 → 不得误报空 (must stay VALIDATION_FAILED)
+        empty = {"type": "text", "text": "暂无相关数据"}
+        prose = {"type": "text", "text": "今日市场综述：指数震荡上行……"}
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            for content in ([empty, prose], [prose, empty]):
+                with self.subTest(tool=tool, content=content):
+                    result = self.fetch_result({"content": content}, tool)
+                    self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+                    self.assertEqual(result.payload["data"], [])
+
+    def test_wenda_empty_json_with_unknown_prose_is_not_misreported(self):
+        # HI1-B02: 空 JSON 结果 {"data":[]} 与未知散文混合 → 不得误报空
+        # values=[[]] 时 data 为空，但有未分类文本，必须 fail-closed
+        empty = {"type": "text", "text": "暂无数据"}
+        prose = {"type": "text", "text": "今日市场综述……"}
+        empty_json = {"type": "text", "text": '{"data":[]}'}
+        for tool in ("wenda_notice_query", "wenda_news_query"):
+            for content in (
+                [empty, prose, empty_json],
+                [empty_json, prose, empty],
+                [prose, empty, empty_json],
+            ):
+                with self.subTest(tool=tool, content=content):
+                    result = self.fetch_result({"content": content}, tool)
+                    self.assertEqual(result.status, ProviderStatus.VALIDATION_FAILED)
+                    self.assertEqual(result.payload["data"], [])
+
     def test_text_app_metadata_stays_raw_only(self):
         body = {"type": "text", "text": "MOCK business markdown"}
         metadata = {"type": "text", "text": "MOCK App metadata", "_meta": {"ui": "MOCK"}}

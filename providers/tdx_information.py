@@ -439,6 +439,7 @@ class TdxInformationProvider(Provider):
             raise _Failure(ProviderStatus.VALIDATION_FAILED)
         _business_error(result)
         empty_notice = False
+        unclassified_text_seen = False
         sc = result.get("structuredContent")
         sc_has_business = isinstance(sc, dict) and (
             "data" in sc or "response" in sc or "ok" in sc or "isError" in sc
@@ -467,6 +468,16 @@ class TdxInformationProvider(Provider):
                         continue  # MCP App metadata is evidence, not business data.
                     if text.lstrip().startswith(("{", "[")):
                         raise _Failure(ProviderStatus.VALIDATION_FAILED) from None
+                    if tool in ("wenda_notice_query", "wenda_news_query"):
+                        lines = [line.strip() for line in text.splitlines() if line.strip()]
+                        if lines and all(_no_data(line) for line in lines):
+                            empty_notice = True
+                        elif lines:
+                            # Unknown prose: cannot be classified as empty.
+                            # Voids any empty-notice claim from other blocks
+                            # (ruling #6: must not misreport as empty).
+                            unclassified_text_seen = True
+                        continue
                     if tool != "tdx_ai_listening":
                         continue
                     # App metadata is evidence, not a business article.
@@ -486,15 +497,23 @@ class TdxInformationProvider(Provider):
                     if not any(name in value for name in ("data", "response", "isError", "ok", "code")):
                         continue  # Unrecognized JSON/App metadata is raw-only.
                 values.append(_business_data(value))
-            if content and not values:
+            if (content and not values
+                    and not (empty_notice and not unclassified_text_seen)
+                    and not (tool in ("wenda_notice_query", "wenda_news_query")
+                             and result.get("isError") is True)):
                 raise _Failure(ProviderStatus.VALIDATION_FAILED)
             nonempty = [value for value in values if value]
             data = nonempty[0] if len(nonempty) == 1 else [
                 row for value in nonempty for row in (value if isinstance(value, list) else [value])]
         if result.get("isError") is True:
-            if empty_notice and not data:
+            if empty_notice and not unclassified_text_seen and not data:
                 raise _Failure(ProviderStatus.NOT_AVAILABLE, "TDX business result: no data")
             raise _Failure(ProviderStatus.UNAVAILABLE, "TDX tool reported a server error")
+        if unclassified_text_seen and not data:
+            # HI1-B02: unknown prose present with empty data.
+            # Cannot declare as explicitly empty; fail closed.
+            # (isError path above takes precedence)
+            raise _Failure(ProviderStatus.VALIDATION_FAILED)
         return data
 
     def fetch(self, request: Mapping[str, Any]) -> ProviderEnvelope:
