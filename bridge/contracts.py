@@ -99,8 +99,18 @@ def map_snapshot(raw: Any) -> dict[str, Any]:
         raise ValueError("TDX did not return success")
 
     def numeric(value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("snapshot field must be a finite nonnegative JSON number")
         try:
-            valid = (not isinstance(value, bool) and isinstance(value, (int, float))
+            if isinstance(value, str):
+                text = value.strip()
+                if not re.fullmatch(r"^[+-]?(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?$", text):
+                    raise ValueError("snapshot field must be a finite nonnegative JSON number")
+                number = float(text)
+                if not math.isfinite(number) or number < 0:
+                    raise ValueError("snapshot field must be a finite nonnegative JSON number")
+                return int(text) if re.fullmatch(r"[+-]?\d+", text) else number
+            valid = (isinstance(value, (int, float))
                      and math.isfinite(value) and value >= 0)
         except OverflowError:
             valid = False
