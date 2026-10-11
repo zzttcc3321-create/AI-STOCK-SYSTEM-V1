@@ -1,0 +1,24 @@
+............................................................................................................................................................................................................................................................................2026-10-10 18:47:02.690 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:47:02.690 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:47:04.675 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-10 18:47:12.219 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:47:12.219 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-10 18:47:15.259 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:47:15.259 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:47:15.259 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..........................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 856 tests in 351.742s
+
+OK
+{"overall": "PASS", "phases": [["A_offline", "PASS"]], "report": "/tmp/tmp3nz5vgc0/run/inner/verify_report.json"}
+{"overall": "INCOMPLETE", "phases": [["C_real_info", "BLOCKED_AUTH"]], "report": "/tmp/tmpe6omngth/run/inner/verify_report.json"}
+{"overall": "FAIL", "phases": [["A_offline", "FAIL"]], "report": "/tmp/tmpnskpob6f/run/inner/verify_report.json"}
+{"overall": "FAIL", "phases": [["A_offline", "FAIL"]], "report": "/tmp/tmp95e9nz_e/run/inner/verify_report.json"}
+{"overall": "FAIL", "phases": [["A_offline", "FAIL"]], "report": "/tmp/tmpw9ebfbx6/run/inner/verify_report.json"}
+{"overall": "PASS", "phases": [["A_offline", "PASS"]], "report": "/tmp/tmpz7uxla7p/run/inner/verify_report.json"}
+EXIT_CODE=0
+HEAD=c84e9c188a8dce38217197a400129d78ccdee14b
+DIFF_CHECK=PASS
+HEAD=a0cb4a47f0c35a1b0df03343faa7e3f5682c68d9
+NOTE=regression ran on identical working tree before commit; code unchanged

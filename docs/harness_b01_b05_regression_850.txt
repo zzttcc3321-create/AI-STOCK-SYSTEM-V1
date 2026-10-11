@@ -1,0 +1,19 @@
+............................................................................................................................................................................................................................................................................2026-10-10 18:25:47.973 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:25:47.973 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:25:49.954 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-10 18:25:57.856 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:25:57.856 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-10 18:26:00.947 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:26:00.947 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-10 18:26:00.947 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+....................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 850 tests in 352.517s
+
+OK
+{"overall": "PASS", "phases": [["A_offline", "PASS"]], "report": "/tmp/tmpd7fspsmf/run/inner/verify_report.json"}
+{"overall": "INCOMPLETE", "phases": [["C_real_info", "BLOCKED_AUTH"]], "report": "/tmp/tmp6ja81tnf/run/inner/verify_report.json"}
+{"overall": "FAIL", "phases": [["A_offline", "FAIL"]], "report": "/tmp/tmpph08ldb4/run/inner/verify_report.json"}
+{"overall": "FAIL", "phases": [["A_offline", "FAIL"]], "report": "/tmp/tmplsreaizy/run/inner/verify_report.json"}
+{"overall": "PASS", "phases": [["A_offline", "PASS"]], "report": "/tmp/tmpseh36mxs/run/inner/verify_report.json"}
+EXIT_CODE=0
