@@ -49,6 +49,14 @@ TASK_ID = "AI-STOCK-V1-014-E2-WINDOWS-VERIFY-HARNESS-R1"
 # a VERIFIED canonical. This is intentional, not a placeholder.
 EMPTY_UNITS: dict = {}
 
+# Independent audited expectation: do not derive verification from the
+# provider's translation table, which is itself being checked.
+FINANCIAL_VIEW_ARGUMENTS = {
+    "profit": {"entry": "TdxShareCW.ph_agf10_cw_lyb", "fixedTag": "00101"},
+    "balance": {"entry": "TdxShareCW.ph_agf10_cw_zcfzb"},
+    "cashflow": {"entry": "TdxShareCW.ph_agf10_cw_xjllb", "fixedTag": "00101"},
+}
+
 QUOTE_SCALARS = ("now", "last_close", "open", "high", "low",
                  "volume", "amount", "average")
 QUOTE_BOOKS = ("bid_prices", "bid_volumes", "ask_prices", "ask_volumes")
@@ -436,6 +444,30 @@ def phase_c_real_info(run_dir: Path, stock_id: str,
                     args = {}
                 args_ok = all(args.get(k) == v for k, v in expected_params.items())
                 stock_ok = req_params.get("stock_id") == expected_stock
+                if expected_tool == "tdx_api_data":
+                    # Financial selectors are translated before HTTP. Require
+                    # both sealed requests and the exact audited mapping;
+                    # missing trace or a contradictory wire copy fails closed.
+                    view_arguments = FINANCIAL_VIEW_ARGUMENTS.get(expected_params.get("view"))
+                    semantic_ok = req_params.get("semantic_request") == {
+                        "method": "tools/call", "stock_id": expected_stock,
+                        "params": {"name": expected_tool, "arguments": expected_params},
+                    }
+                    expected_arguments = ({**view_arguments, "code": expected_stock[:6]}
+                                          if view_arguments is not None else None)
+                    args_ok = expected_arguments is not None and args == expected_arguments
+                    provider_request = req_params.get("provider_request")
+                    provider_ok = provider_request == {
+                        "method": "tools/call", "stock_id": expected_stock,
+                        "params": {"name": expected_tool, "arguments": expected_arguments},
+                    } and provider_request == {
+                        "method": req_params.get("method"), "stock_id": req_params.get("stock_id"),
+                        "params": nested,
+                    }
+                    info["binding_semantic_ok"] = semantic_ok
+                    info["binding_provider_ok"] = provider_ok
+                    info["binding_mapping_ok"] = args_ok
+                    args_ok = args_ok and semantic_ok and provider_ok
                 params_ok = method_ok and name_ok and args_ok and stock_ok
                 info["binding_tool_ok"] = tool_ok
                 info["binding_method_ok"] = method_ok

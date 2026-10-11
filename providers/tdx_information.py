@@ -285,7 +285,8 @@ class TdxInformationProvider(Provider):
         return next((v for k, v in headers.items() if k.lower() == name.lower()), None)
 
     def _archive_response(self, response: MCPResponse, *, method: str, params: Mapping[str, Any],
-             context: Mapping[str, str], at: str, entries: list) -> None:
+             context: Mapping[str, str], at: str, entries: list,
+             semantic_request: Mapping[str, Any] | None = None) -> None:
         data = response.body
         if not isinstance(data, bytes) or len(data) > MAX_BODY_BYTES + 1:
             raise _Failure(ProviderStatus.VALIDATION_FAILED)
@@ -303,11 +304,18 @@ class TdxInformationProvider(Provider):
         identity = ArchiveIdentity(context["system_run_id"], context["collection_task_id"],
                                    context["request_id"], evidence_id)
         tool = params.get("name") if method == "tools/call" else method
+        provider_request = {"method": method, "params": params,
+                            "stock_id": context.get("stock_id")}
+        request_params = {**provider_request, "request_day": at[:10]}
+        if semantic_request is not None:
+            # Add trace within the existing Mapping contract. Keep the wire
+            # fields in place for existing archive/normalizer consumers.
+            request_params.update(semantic_request=semantic_request,
+                                  provider_request=provider_request)
         receipt = self._archive.write(
             identity=identity, source=LOGICAL_SOURCE, raw_parts={"response": data},
             endpoint_or_tool=f"{ENDPOINT}#{tool}",
-            request_params={"method": method, "params": params,
-                            "stock_id": context.get("stock_id"), "request_day": at[:10]},
+            request_params=request_params,
             request_timestamp=at, source_reference=f"{ENDPOINT}#{tool}", secrets=(self._key,),
             attributes={"http_status": response.status, "raw_response_complete": len(data) <= MAX_BODY_BYTES,
                         "actual_provider_service": ACTUAL_PROVIDER_SERVICE})
@@ -315,7 +323,7 @@ class TdxInformationProvider(Provider):
                         "raw_bytes": data})
 
     def _rpc(self, method: str, params: Mapping[str, Any], *, context, at, entries,
-             notification: bool = False):
+             notification: bool = False, semantic_request: Mapping[str, Any] | None = None):
         rpc_id = uuid4().hex
         body = {"jsonrpc": "2.0", "method": method, "params": params}
         if not notification:
@@ -335,7 +343,8 @@ class TdxInformationProvider(Provider):
             raise _Failure(ProviderStatus.AUTH_FAILED) from None
         except OSError:
             raise _Failure(ProviderStatus.NOT_AVAILABLE) from None
-        self._archive_response(response, method=method, params=params, context=context, at=at, entries=entries)
+        self._archive_response(response, method=method, params=params, context=context, at=at,
+                               entries=entries, semantic_request=semantic_request)
         if response.status in (401, 403):
             raise _Failure(ProviderStatus.AUTH_FAILED)
         if response.status == 404 and self._session:
@@ -543,6 +552,12 @@ class TdxInformationProvider(Provider):
             arguments = request["arguments"]
             if not isinstance(arguments, Mapping):
                 raise ValueError("arguments required")
+            semantic_request = None
+            if tool == "tdx_api_data":
+                # Capture the public selector before _arguments derives the
+                # gateway fields, including on errors and session retries.
+                semantic_request = {"method": "tools/call", "stock_id": stock,
+                                    "params": {"name": tool, "arguments": _plain(arguments)}}
             arguments = _arguments(tool, stock, arguments)
             encoded = _encode(arguments)
             if len(encoded) > 65536:
@@ -565,7 +580,8 @@ class TdxInformationProvider(Provider):
                 if tool not in self._tools:
                     raise _Failure(ProviderStatus.NOT_AVAILABLE)
                 result, _ = self._rpc("tools/call", {"name": tool, "arguments": arguments},
-                                      context=context, at=at, entries=entries)
+                                      context=context, at=at, entries=entries,
+                                      semantic_request=semantic_request)
                 return self._data(result, tool=tool)
 
             payload["data"] = self._execute(call, context=context, at=at, entries=entries)
