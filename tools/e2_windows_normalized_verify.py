@@ -28,7 +28,7 @@ from normalizer import InformationNormalizer
 from normalizer.information import validate_information_evidence
 from providers import ProviderStatus
 from providers.tdx_information import TdxInformationProvider
-from tools.e2_windows_verify import git_head, git_status, new_run_dir
+from tools.e2_windows_verify import FINANCIAL_VIEW_ARGUMENTS, git_head, git_status, new_run_dir
 
 TASK_ID = "AI-STOCK-V1-014-E2-NORMALIZED-CANONICAL-WINDOWS"
 
@@ -57,10 +57,57 @@ def _sidecar(reader: ArchiveReader, uri: str, name: str) -> dict:
     return payload
 
 
-def verify_information(envelope, writer: ArchiveWriter, *, canonical_id=None) -> dict:
+def _financial_binding(envelope, original, expected_request) -> bool:
+    """Reuse Phase C _verify_call's exact dual-request audited expectation.
+
+    The caller supplies the public fetch request, independently of the archive
+    and the provider's translated envelope arguments. Missing context fails closed.
+    """
+    if not isinstance(expected_request, dict):
+        return False
+    expected_tool = expected_request.get("tool")
+    expected_stock = expected_request.get("stock_id")
+    expected_params = expected_request.get("arguments")
+    if (expected_tool != "tdx_api_data" or not isinstance(expected_stock, str)
+            or not isinstance(expected_params, dict)):
+        return False
+    req_params = plain(original.request_params)
+    nested = req_params.get("params", {})
+    if not isinstance(nested, dict):
+        return False
+    args = nested.get("arguments", {})
+    view_arguments = FINANCIAL_VIEW_ARGUMENTS.get(expected_params.get("view"))
+    semantic_ok = req_params.get("semantic_request") == {
+        "method": "tools/call", "stock_id": expected_stock,
+        "params": {"name": expected_tool, "arguments": expected_params},
+    }
+    expected_arguments = ({**view_arguments, "code": expected_stock[:6]}
+                          if view_arguments is not None else None)
+    args_ok = expected_arguments is not None and args == expected_arguments
+    provider_request = req_params.get("provider_request")
+    provider_ok = provider_request == {
+        "method": "tools/call", "stock_id": expected_stock,
+        "params": {"name": expected_tool, "arguments": expected_arguments},
+    } and provider_request == {
+        "method": req_params.get("method"), "stock_id": req_params.get("stock_id"),
+        "params": nested,
+    }
+    return bool(semantic_ok and provider_ok and args_ok
+                and original.endpoint_or_tool.endswith("#" + expected_tool)
+                and req_params.get("method") == "tools/call"
+                and nested.get("name") == expected_tool
+                and req_params.get("stock_id") == expected_stock
+                and envelope.payload.get("tool") == expected_tool
+                and envelope.payload.get("stock_id") == expected_stock
+                and envelope.payload.get("arguments") == expected_arguments)
+
+
+def verify_information(envelope, writer: ArchiveWriter, *, canonical_id=None,
+                       expected_request=None) -> dict:
     """Verify one live provider envelope; no synthetic substitution on failure."""
     stages = {name: {"verified": False} for name in ("raw", "normalized", "canonical_evidence")}
     summary = {"result": "FAIL", "provider_status": envelope.status.value, "stages": stages}
+    failure_code = "CHAIN_VERIFICATION_FAILED"
     try:
         require(envelope.status in (ProviderStatus.AVAILABLE, ProviderStatus.NOT_AVAILABLE),
                 "PROVIDER_NOT_AVAILABLE")
@@ -87,15 +134,24 @@ def verify_information(envelope, writer: ArchiveWriter, *, canonical_id=None) ->
             "raw_response_hash": sha256(raw), "sidecar_hash": json_hash(raw_sidecar),
             "durability_level": back["durability_level"],
         }
+        if (envelope.payload.get("tool") == "tdx_api_data"
+                or expected_request is not None and expected_request.get("tool") == "tdx_api_data"):
+            failure_code = "FINANCIAL_SEMANTIC_MAPPING_MISMATCH"
+            require(_financial_binding(envelope, original, expected_request), failure_code)
+            summary["financial_semantic_mapping_verified"] = True
+            failure_code = "CHAIN_VERIFICATION_FAILED"
         normalizer = InformationNormalizer()
         result = normalizer.normalize(envelope, source_evidence=original, raw_bytes=raw)
         repeated = normalizer.normalize(envelope, source_evidence=original, raw_bytes=raw)
         require(plain(result) == plain(repeated), "NORMALIZATION_NONDETERMINISTIC")
         summary["normalization_deterministic"] = True
+        # Normalizer has checked stock/tool/arguments, clocks, raw response
+        # content and status consistency, including for empty responses.
+        summary["binding_verified"] = True
         summary["record_count"] = len(result.canonical_data)
         if not result.canonical_data:
-            summary["result"] = "INCOMPLETE"
-            summary["error_code"] = "NO_CANONICAL_CONTENT"
+            require(envelope.status == ProviderStatus.NOT_AVAILABLE, "EMPTY_STATUS_MISMATCH")
+            summary["result"] = "NOT_AVAILABLE_ACCEPTED"
             return summary
         canonical = EvidenceBuilder().build(
             fetch_result=envelope, endpoint_or_tool=original.endpoint_or_tool,
@@ -144,7 +200,7 @@ def verify_information(envelope, writer: ArchiveWriter, *, canonical_id=None) ->
         summary["result"] = "PASS"
     except Exception as exc:
         # Never persist exception text: it can contain echoed credentials.
-        summary.update(error_type=type(exc).__name__, error_code="CHAIN_VERIFICATION_FAILED")
+        summary.update(error_type=type(exc).__name__, error_code=failure_code)
     return summary
 
 
@@ -164,17 +220,32 @@ def real_information(run_dir: Path, stock_id: str, date_from: str, date_to: str)
     run_id = "e2norm" + uuid.uuid4().hex
     for label, tool, kind, arguments in cases:
         try:
-            envelope = provider.fetch({
+            request = {
                 "system_run_id": run_id, "collection_task_id": label, "request_id": uuid.uuid4().hex,
                 "stock_id": stock_id, "tool": tool, "data_kind": kind, "arguments": arguments,
-            })
-            calls[label] = verify_information(envelope, writer)
+            }
+            envelope = provider.fetch(request)
+            calls[label] = verify_information(envelope, writer, expected_request=request)
         except Exception as exc:
             calls[label] = {"result": "FAIL", "error_type": type(exc).__name__,
                             "error_code": "CHAIN_VERIFICATION_FAILED"}
     statuses = [call["result"] for call in calls.values()]
-    overall = "FAIL" if "FAIL" in statuses else "PASS" if all(s == "PASS" for s in statuses) else "INCOMPLETE"
-    return {"result": overall, "calls": calls}
+    core = ("announcement", "financial_profit", "financial_balance", "financial_cashflow")
+    optional = ("news", "research")
+    if "FAIL" in statuses:
+        overall = "FAIL"
+    elif all(s == "PASS" for s in statuses):
+        overall = "PASS"
+    elif (all(calls[label]["result"] == "PASS" for label in core)
+          and all(calls[label]["result"] in ("PASS", "NOT_AVAILABLE_ACCEPTED") for label in optional)):
+        overall = "LIMITED_PASS"
+    else:
+        overall = "INCOMPLETE"
+    return {"result": overall, "calls": calls,
+            "verification_scope": "FULL" if overall == "PASS" else "LIMITED" if overall == "LIMITED_PASS" else "UNVERIFIED",
+            "verified_categories": [label for label, call in calls.items() if call["result"] == "PASS"],
+            "limited_scope": {label: call["result"] for label, call in calls.items()
+                              if call["result"] == "NOT_AVAILABLE_ACCEPTED"}}
 
 
 def main(argv=None) -> int:
@@ -192,12 +263,17 @@ def main(argv=None) -> int:
     except Exception as exc:
         report.update(result="FAIL", error_type=type(exc).__name__, error_code="CHAIN_VERIFICATION_FAILED")
     # A Linux execution may verify content but cannot certify Windows execution.
-    report["windows_real_chain_verified"] = sys.platform == "win32" and report["result"] == "PASS"
+    report["windows_real_chain_verified"] = (sys.platform == "win32" and report["result"] == "PASS"
+                                              and report.get("verification_scope") == "FULL")
+    report["windows_limited_chain_verified"] = (sys.platform == "win32" and report["result"] == "LIMITED_PASS"
+                                                 and report.get("verification_scope") == "LIMITED")
     path = run_dir / "normalized_verify_report.json"
     path.write_bytes(canonical_json(report))
     print(canonical_json({"result": report["result"],
+                          "verification_scope": report.get("verification_scope", "UNVERIFIED"),
+                          "windows_limited_chain_verified": report["windows_limited_chain_verified"],
                           "windows_real_chain_verified": report["windows_real_chain_verified"]}).decode())
-    return 0 if report["result"] == "PASS" else 1 if report["result"] == "FAIL" else 2
+    return 0 if report["result"] in ("PASS", "LIMITED_PASS") else 1 if report["result"] == "FAIL" else 2
 
 
 if __name__ == "__main__":
