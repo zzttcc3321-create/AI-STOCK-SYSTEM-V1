@@ -1,7 +1,7 @@
 name: Runtime closure 014-R1
 on:
   pull_request:
-    branches: [main, 'codex/014-r1-*']
+    branches: [main, 'codex/014-r1-*', 'codex/014-e7-*']
 permissions:
   contents: read
 jobs:
