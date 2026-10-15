@@ -45,22 +45,39 @@ def is_temporary_database(db):
     return Path(filename).resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
 
 
-def _require_real_db_write(db):
+def _require_real_db_write(db, *, _migration=False):
     """Check actual connected files on every write, including caller-opened DBs."""
+    try:
+        if is_temporary_database(db):
+            return
+    except (OSError, RuntimeError, ValueError):
+        require(False, "REAL_DB_PROTECTED_PATHS_INVALID")
+
+    # Migration authorization applies to every non-temporary DB, independently
+    # of the runtime protected-path list and runtime write permission.
+    if _migration:
+        require(os.environ.get("APPLY_REAL_DB") == "YES",
+                "APPLY_REAL_DB_NOT_AUTHORIZED: requires APPLY_REAL_DB=YES")
+        return
+
     try:
         protected = {Path(value.strip()).expanduser().resolve()
                      for value in os.environ.get("REAL_DB_PROTECTED_PATHS", "").split(",")
                      if value.strip()}
+    except (OSError, RuntimeError, ValueError):
+        require(False, "REAL_DB_PROTECTED_PATHS_INVALID")
+    require(bool(protected), "REAL_DB_PROTECTED_PATHS_UNCONFIGURED")
+    try:
         filenames = {Path(row[2]).resolve() for row in db.execute("PRAGMA database_list") if row[2]}
     except (OSError, RuntimeError, ValueError):
         require(False, "REAL_DB_PROTECTED_PATHS_INVALID")
     if protected & filenames:
-        require(os.environ.get("REAL_DB_WRITE") == "YES" or os.environ.get("APPLY_REAL_DB") == "YES",
-                "REAL_DB_WRITE_NOT_AUTHORIZED: requires REAL_DB_WRITE=YES or APPLY_REAL_DB=YES")
+        require(os.environ.get("REAL_DB_WRITE") == "YES",
+                "REAL_DB_WRITE_NOT_AUTHORIZED: requires REAL_DB_WRITE=YES")
 
 
-def transaction(db, operation):
-    _require_real_db_write(db)
+def transaction(db, operation, *, _migration=False):
+    _require_real_db_write(db, _migration=_migration)
     configure(db)
     db.execute("BEGIN IMMEDIATE")
     try:
