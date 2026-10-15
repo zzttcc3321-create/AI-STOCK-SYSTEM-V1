@@ -16,20 +16,24 @@ from test_normalizer import daily_bar, envelope, UNITS
 from windows_compat import use_simulated_directory_fsync
 
 
-def daily_evidence(writer, db, *, count=60, direction=1, zero_volume=False, adjustment='UNADJUSTED', identifier='EV-DAILY'):
+def daily_evidence(writer, db, *, count=60, direction=1, zero_volume=False, adjustment='UNADJUSTED', identifier='EV-DAILY',
+                   acquired_at=None, judgment_cutoff=None, disclosure_time=None,
+                   request_timestamp='2026-09-30T17:00:00Z'):
     bars = []
     for i in range(count):
         close = 100 + direction * i
         bars.append(daily_bar(trade_date=(date(2026, 1, 1) + timedelta(days=i)).strftime('%Y%m%d'),
             open=close, high=close, low=close, close=close, pre_close=close,
-            vol=0 if zero_volume else 100 if i < count-1 else 115, adjust_type=adjustment))
+            vol=0 if zero_volume else 100 if i < count-1 else 115, adjust_type=adjustment,
+            disclosure_time=disclosure_time))
     raw = json.dumps({'bars': bars}).encode()
     identity = ArchiveIdentity('run', 'daily', identifier, 'raw-' + identifier)
     receipt = writer.write(identity=identity, evidence_id='RAW-' + identifier, source='TUSHARE_MCP',
         raw_parts={'response': raw}, endpoint_or_tool='daily', request_params={'stock_id': '601518.SH'},
-        request_timestamp='2026-09-30T17:00:00Z')
-    env = replace(envelope(payload={'bars': bars}), raw_reference=identity.uri)
-    normalized = DataNormalizer().normalize(env, units=UNITS)
+        request_timestamp=request_timestamp)
+    env = replace(envelope(payload={'bars': bars}), raw_reference=identity.uri, request_timestamp=request_timestamp)
+    normalized = DataNormalizer().normalize(env, units=UNITS, acquired_at=acquired_at,
+                                            judgment_cutoff=judgment_cutoff)
     record = EvidenceBuilder().build(fetch_result=env, endpoint_or_tool='daily', request_params=receipt['record'].request_params,
         system_run_id='run', collection_task_id='daily', normalization_result=normalized,
         raw_response_hash=receipt['record'].raw_response_hash, raw_reference_id=identity.evidence_id,
@@ -82,6 +86,60 @@ class IndicatorCalculatorTests(unittest.TestCase):
         self.assertIsNone(result['volume_change'])
         self.assertEqual(result['trend'], 'UNKNOWN')
         self.assertEqual(result['DATA_STATUS'], 'PARTIAL')
+
+    def test_historical_cutoff_excludes_all_later_disclosed_and_acquired_rows(self):
+        daily_evidence(self.writer, self.db, judgment_cutoff='2026-01-31T23:59:59+08:00',
+                       acquired_at='2026-03-02T09:00:00+08:00',
+                       disclosure_time='2026-03-02T09:00:00+08:00',
+                       request_timestamp='2026-03-02T08:59:59+08:00')
+        result = self.calculator.calculate('EV-DAILY')
+        self.assertEqual(result['sample_count'], 0)
+        self.assertIsNone(result['as_of'])
+        for metric in ('ma5', 'ma20', 'ma60', 'volume_change'):
+            self.assertIsNone(result[metric])
+        self.assertEqual(result['trend'], 'UNKNOWN')
+        self.assertEqual(result['DATA_STATUS'], 'PARTIAL')
+        self.assertTrue({'DISCLOSED_AFTER_CUTOFF', 'ACQUIRED_AFTER_CUTOFF',
+                         'JUDGMENT_CUTOFF_EXCLUDED_ROWS'} <= set(result['limitations']))
+
+    def test_future_trade_dates_are_excluded_before_each_indicator(self):
+        daily_evidence(self.writer, self.db, judgment_cutoff='2026-01-31T23:59:59+08:00',
+                       acquired_at='2026-01-31T16:00:00+08:00',
+                       disclosure_time='2026-01-31T16:00:00+08:00',
+                       request_timestamp='2026-01-31T15:59:59+08:00')
+        result = self.calculator.calculate('EV-DAILY')
+        self.assertEqual(result['sample_count'], 31)
+        self.assertEqual(result['as_of'], '2026-01-31')
+        self.assertEqual(result['ma5'], 128.0)
+        self.assertEqual(result['ma20'], 120.5)
+        self.assertIsNone(result['ma60'])
+        self.assertEqual(result['volume_change'], 0.0)
+        self.assertEqual(result['trend'], 'UNKNOWN')
+        self.assertEqual(result['DATA_STATUS'], 'PARTIAL')
+        self.assertIn('DATA_PERIOD_AFTER_CUTOFF', result['limitations'])
+        self.assertIn('MA60_INSUFFICIENT_HISTORY', result['limitations'])
+
+    def test_equal_cutoff_clocks_use_china_trade_date_and_keep_eligible_history(self):
+        boundary = '2026-02-28T16:00:00Z'  # March 1 in the A-share calendar.
+        daily_evidence(self.writer, self.db, judgment_cutoff=boundary,
+                       acquired_at='2026-03-01T00:00:00+08:00',
+                       disclosure_time='2026-03-01T00:00:00+08:00',
+                       request_timestamp=boundary)
+        result = self.calculator.calculate('EV-DAILY')
+        self.assertEqual(result['sample_count'], 60)
+        self.assertEqual(result['as_of'], '2026-03-01')
+        self.assertEqual(result['ma5'], 157.0)
+        self.assertEqual(result['DATA_STATUS'], 'PASS')
+        self.assertEqual(result['limitations'], [])
+
+    def test_unknown_disclosure_at_cutoff_cannot_supply_indicators(self):
+        daily_evidence(self.writer, self.db, judgment_cutoff='2026-03-02T09:00:00+08:00',
+                       acquired_at='2026-03-02T09:00:00+08:00',
+                       request_timestamp='2026-03-02T08:59:59+08:00')
+        result = self.calculator.calculate('EV-DAILY')
+        self.assertEqual(result['sample_count'], 0)
+        self.assertEqual(result['DATA_STATUS'], 'PARTIAL')
+        self.assertIn('DISCLOSED_AT_UNVERIFIED', result['limitations'])
 
     def test_unknown_adjustment_never_produces_trend(self):
         daily_evidence(self.writer, self.db, adjustment=None)

@@ -86,7 +86,9 @@ def _rules(result: Any) -> tuple[str, ...] | None:
     return tuple(rules) or None
 
 
-def _validation(result: Any) -> EvidenceValidationResult:
+def _validation(result: Any, fetch_result: Any) -> EvidenceValidationResult:
+    if _get(fetch_result, "status") == "VALIDATION_FAILED":
+        return EvidenceValidationResult(ValidationStatus.FAIL, ("provider status VALIDATION_FAILED",))
     if result is None:
         return EvidenceValidationResult(ValidationStatus.NOT_VALIDATED)
     validations = [_get(record, "validation_result") for record in _get(result, "normalized_data", ())]
@@ -150,7 +152,7 @@ class EvidenceBuilder:
                 request_params=sanitize_request_params(request_params),
                 request_timestamp=_utc8(_get(fetch_result, "request_timestamp")),
                 provider_timestamp=_get(fetch_result, "provider_timestamp"), raw_response_path=raw_path,
-                normalization_rule=_rules(normalization_result), validation_result=_validation(normalization_result),
+                normalization_rule=_rules(normalization_result), validation_result=_validation(normalization_result, fetch_result),
                 collection_task_id=collection_task_id, system_run_id=system_run_id,
                 model_version=model_version, human_confirm=human_confirm,
                 raw_response_hash=(raw_response_hash or sha256_digest(_get(fetch_result, "payload"))) if raw_path else None,

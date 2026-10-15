@@ -298,6 +298,11 @@ class TushareMCPProvider(Provider):
             factor = bar.get("adj_factor")
             if factor is None:
                 errors.append(f"bar[{index}] missing adj_factor")
+            boolean_fields = sorted(field for field in REQUIRED_BAR_FIELDS | {"adj_factor"}
+                                    if isinstance(bar.get(field), bool))
+            if boolean_fields:
+                errors.append(f"bar[{index}] has boolean numeric fields: {', '.join(boolean_fields)}")
+                continue
             try:
                 pct_chg, volume = float(bar.get("pct_chg")), float(bar.get("vol"))
                 if abs(pct_chg) > 20:
