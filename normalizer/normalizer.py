@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 from typing import Any, Mapping, Sequence
 from evidence.knowability import aware_clock, disclosure_fact, time_facts
 
 from .contracts import (
     FRESHNESS_REQUEST_MAX_GAP_SECONDS, FRESHNESS_STALE_AFTER_SECONDS,
-    ConversionRule, Freshness, FreshnessCheck, MissingData, NormalizationResult, NormalizationRule,
+    ConversionRule, DataQualityStatus, Freshness, FreshnessCheck, MissingData, NormalizationResult, NormalizationRule,
     NormalizedRecord, NumericField, UnitStatus,
 )
 from .semantics import metadata
@@ -96,6 +96,8 @@ def _numeric(raw_value: Any, raw_unit: str | None, normalized_unit: str) -> Nume
     if raw_value is None:
         # Missing is not an unknown unit and must remain missing.
         return NumericField(None, raw_unit, None, normalized_unit, ConversionRule.IDENTITY, UnitStatus.VERIFIED)
+    if isinstance(raw_value, bool):
+        return NumericField(raw_value, raw_unit, None, normalized_unit, None, UnitStatus.UNVERIFIED)
     try:
         number = float(raw_value)
     except (TypeError, ValueError):
@@ -141,6 +143,7 @@ class DataNormalizer:
         declarations.update(units or {})
         provider = _get(envelope, "provider_name")
         provider_timestamp = _get(envelope, "provider_timestamp")
+        provider_failed = _get(envelope, "status") == "VALIDATION_FAILED"
         records: list[NormalizedRecord] = []
         canonical: list[Mapping[str, Any]] = []
         seen: set[str] = set()
@@ -149,6 +152,13 @@ class DataNormalizer:
             record_source = {**semantic_declarations, **bar} if isinstance(bar, Mapping) else bar
             record, output = self._daily_record(record_source, provider, provider_timestamp, declarations,
                                                acquired_at, judgment_cutoff)
+            if provider_failed:
+                validation = record.validation_result
+                record = replace(record, validation_result=replace(
+                    validation, passed=False, status=DataQualityStatus.FAILED,
+                    failures=validation.failures + ("provider status VALIDATION_FAILED",),
+                ))
+                output = None
             for step in record.values.get("conversion_chain", ()):
                 if step["field"] in semantic_declarations and isinstance(bar, Mapping) and step["field"] not in bar:
                     step["source"] = f"{provider}.payload.{step['field']}"

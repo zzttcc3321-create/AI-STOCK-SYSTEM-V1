@@ -3,11 +3,12 @@
 Reads only the V1 evidence_records table and normalized archive sidecars.
 No legacy market-table access, raw business input, network, or database writes.
 """
-from datetime import date
+from datetime import date, timedelta, timezone
 from decimal import Decimal, localcontext
 import math
 
 from normalizer.semantics import validate_metadata
+from evidence.knowability import aware_clock, cutoff_reasons, validate_times
 from persistence.read_models import EvidenceReadRepository
 
 
@@ -24,6 +25,47 @@ def number(value):
     require(type(value) in (int, float) and math.isfinite(value) and value >= 0,
             'CANONICAL_NUMBER_INVALID')
     return Decimal(str(value))
+
+
+def _at_judgment_cutoff(content, request_timestamp):
+    """Apply the same historical clocks as the package gate before calculation."""
+    try:
+        cutoffs = []
+        for row in content:
+            times = row.get('knowability')
+            if times is not None:
+                validate_times(times)
+                fact = times['judgment_cutoff']
+                if fact['value'] is not None:
+                    require(fact['status'] == 'VERIFIED', 'JUDGMENT_CUTOFF_UNVERIFIED')
+                    cutoffs.append(fact['value'])
+        if not cutoffs:
+            return content, []
+        cutoff = cutoffs[0]
+        require(all(aware_clock(value) == aware_clock(cutoff) for value in cutoffs),
+                'JUDGMENT_CUTOFF_CONFLICT')
+        retained, reasons = [], set()
+        for row in content:
+            times = row.get('knowability')
+            if times is None:
+                reasons.add('KNOWABILITY_UNVERIFIED')
+                continue
+            excluded = list(cutoff_reasons(times, cutoff,
+                                          period_timezone=timezone(timedelta(hours=8))))
+            if times['data_period']['value'] != row['trade_date']:
+                excluded.append('SOURCE_TIME_CONFLICT')
+            acquired = times['acquired_at']
+            if acquired['status'] == 'VERIFIED' and aware_clock(request_timestamp) > aware_clock(acquired['value']):
+                excluded.append('SOURCE_TIME_CONFLICT')
+            if excluded:
+                reasons.update(excluded)
+            else:
+                retained.append(row)
+        if len(retained) != len(content):
+            reasons.add('JUDGMENT_CUTOFF_EXCLUDED_ROWS')
+        return retained, sorted(reasons)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise IndicatorError('CANONICAL_KNOWABILITY_INVALID: ' + str(exc)) from None
 
 
 class IndicatorCalculator:
@@ -64,8 +106,8 @@ class IndicatorCalculator:
                     prices['high'] >= prices['low'], 'CANONICAL_PRICE_INVALID')
         require(len(stocks) == len(bases) == 1, 'MIXED_STOCK_OR_ADJUSTMENT')
         require(quality <= {'PASS', 'WARNING', 'UNVERIFIED'}, 'CANONICAL_QUALITY_INVALID')
-        ordered = sorted(content, key=lambda r: r['trade_date'])
-        reasons = []
+        usable, reasons = _at_judgment_cutoff(content, evidence['timestamp'])
+        ordered = sorted(usable, key=lambda r: r['trade_date'])
         verified_basis = bases <= {'UNADJUSTED', 'QFQ', 'HFQ'} and all(r.get('adjust_status') == 'VERIFIED' for r in ordered)
         if not verified_basis:
             reasons.append('ADJUSTMENT_UNVERIFIED')
@@ -74,7 +116,7 @@ class IndicatorCalculator:
         result = {'stock_id': next(iter(stocks)), 'evidence_id': evidence_id,
                   'canonical_id': evidence.get('canonical_id'), 'raw_reference_id': evidence.get('raw_reference_id'),
                   'normalized_data_hash': content_hash, 'rule_version': 'INDICATORS_V1.0',
-                  'as_of': ordered[-1]['trade_date'], 'sample_count': len(ordered),
+                  'as_of': ordered[-1]['trade_date'] if ordered else None, 'sample_count': len(ordered),
                   'adjustment_basis': next(iter(bases))}
         with localcontext() as context:
             context.prec = 40

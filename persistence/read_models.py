@@ -207,6 +207,8 @@ class EvidenceReadRepository:
                         and record["supersedes_evidence_id"] == result["supersedes_evidence_id"], "ARCHIVE_RECORD_MISMATCH")
                 calculation = result["calculation"] or {}
                 normalized_hash = calculation.get("normalized_data_hash")
+                if record.get("canonical_id") is not None:
+                    require(normalized_hash == record["normalized_data_hash"], "NORMALIZED_RECORD_MISMATCH")
                 if normalized_hash is not None:
                     normalized = self.archive_reader.normalized(reference, normalized_hash)
                     require(normalized["normalization_rule"] == calculation.get("normalization_rule") and

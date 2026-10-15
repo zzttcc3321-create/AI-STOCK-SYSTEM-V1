@@ -47,6 +47,23 @@ class DashboardRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.executor.calls, [])
         self.assertIsNone(runtime.flow)
 
+    def test_prepare_never_displays_indicators_from_after_judgment_cutoff(self):
+        record, _ = daily_evidence(self.runtime.writer, self.db, identifier='EV-HISTORICAL',
+                                  judgment_cutoff='2026-01-31T23:59:59+08:00',
+                                  acquired_at='2026-03-02T09:00:00+08:00',
+                                  disclosure_time='2026-03-02T09:00:00+08:00',
+                                  request_timestamp='2026-03-02T08:59:59+08:00')
+        self.runtime.prepare(record.evidence_id)
+        self.assertEqual(self.runtime.indicators['sample_count'], 0)
+        self.assertIsNone(self.runtime.indicators['as_of'])
+        for metric in ('ma5', 'ma20', 'ma60', 'volume_change'):
+            self.assertIsNone(self.runtime.indicators[metric])
+        self.assertEqual(self.runtime.indicators['DATA_STATUS'], 'PARTIAL')
+        self.assertIn('JUDGMENT_CUTOFF_EXCLUDED_ROWS', self.runtime.indicators['limitations'])
+        self.assertEqual(self.runtime.package.daily_kline_summary['records'], ())
+        self.assertEqual(self.runtime.data_status, 'PARTIAL')
+        self.assertEqual(self.runtime.executor.calls, [])
+
     def test_human_review_final_archive_and_full_readback_trace(self):
         runtime = self.runtime
         runtime.prepare(self.record.evidence_id)
