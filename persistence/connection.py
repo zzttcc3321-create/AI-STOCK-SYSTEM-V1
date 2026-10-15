@@ -1,4 +1,5 @@
 """Explicit connections; importing this module performs no database IO."""
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -44,7 +45,22 @@ def is_temporary_database(db):
     return Path(filename).resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
 
 
+def _require_real_db_write(db):
+    """Check actual connected files on every write, including caller-opened DBs."""
+    try:
+        protected = {Path(value.strip()).expanduser().resolve()
+                     for value in os.environ.get("REAL_DB_PROTECTED_PATHS", "").split(",")
+                     if value.strip()}
+        filenames = {Path(row[2]).resolve() for row in db.execute("PRAGMA database_list") if row[2]}
+    except (OSError, RuntimeError, ValueError):
+        require(False, "REAL_DB_PROTECTED_PATHS_INVALID")
+    if protected & filenames:
+        require(os.environ.get("REAL_DB_WRITE") == "YES" or os.environ.get("APPLY_REAL_DB") == "YES",
+                "REAL_DB_WRITE_NOT_AUTHORIZED: requires REAL_DB_WRITE=YES or APPLY_REAL_DB=YES")
+
+
 def transaction(db, operation):
+    _require_real_db_write(db)
     configure(db)
     db.execute("BEGIN IMMEDIATE")
     try:
