@@ -19,14 +19,15 @@ def configure(db, busy_timeout=5000):
     return db
 
 
-def open_database(path, *, readonly=False):
+def open_database(path, *, readonly=False, check_same_thread=True):
+    # Cross-thread callers must serialize complete operations, including transactions.
     if str(path) == ":memory:":
         require(not readonly, "MEMORY_READONLY_UNSUPPORTED")
-        db = sqlite3.connect(":memory:", isolation_level=None)
+        db = sqlite3.connect(":memory:", isolation_level=None, check_same_thread=check_same_thread)
     else:
         resolved = Path(path).resolve(strict=True)
         db = sqlite3.connect(resolved.as_uri() + ("?mode=ro" if readonly else "?mode=rw"),
-                             uri=True, isolation_level=None)
+                             uri=True, isolation_level=None, check_same_thread=check_same_thread)
     try:
         return configure(db)
     except BaseException:

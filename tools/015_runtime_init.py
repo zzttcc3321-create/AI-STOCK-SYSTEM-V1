@@ -7,6 +7,7 @@ from decimal import Decimal
 import json
 from pathlib import Path
 import re
+import stat
 import sys
 import tempfile
 
@@ -26,10 +27,26 @@ STEPS = tuple(f'015-{i:02}' for i in range(1, 7))
 FLAGS = dict(zip(STEPS[3:], ('security_master_import', 'holding_config_write', 'dashboard_data_write')))
 
 
+def require_safe_directory(path, *, must_exist=False):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        require(not must_exist, 'DIRECTORY_UNSAFE')
+        return
+    except OSError as exc:
+        raise GateError('DIRECTORY_UNSAFE') from exc
+    attributes = getattr(info, 'st_file_attributes', None)
+    require(sys.platform != 'win32' or attributes is not None, 'DIRECTORY_UNSAFE')
+    # lstat preserves junction/reparse metadata that is_symlink() misses.
+    require(stat.S_ISDIR(info.st_mode) and not ((attributes or 0) &
+            getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)), 'DIRECTORY_UNSAFE')
+
+
 def external_root(path):
-    # Reject symlinked ancestors as well as the final component before writes.
+    # Inspect original ancestors before resolve() can follow a junction/link.
     absolute = path.absolute()
-    require(not any(p.is_symlink() for p in (absolute, *absolute.parents)), 'DIRECTORY_UNSAFE')
+    for component in reversed((absolute, *absolute.parents)):
+        require_safe_directory(component)
     root = path.resolve()
     require(not root.is_relative_to(ROOT), 'BASE_DIR_IN_REPOSITORY')
     return root
@@ -63,8 +80,8 @@ def directories(args, report):
             'EXPECTED_HEAD_MISMATCH')
     root = external_root(args.base_dir)
     targets = [root / name for name in ('runtime', 'cache', 'logs', 'reports')]
-    require(all(not p.is_symlink() and (not p.exists() or p.is_dir()) for p in [root, *targets]),
-            'DIRECTORY_UNSAFE')
+    for path in [root, *targets]:
+        require_safe_directory(path)
     created = []
     for path in [root, *targets]:
         if not path.exists():
@@ -123,7 +140,7 @@ def dashboard(args, report):
     require(args.dashboard_data_write == 'yes', 'DASHBOARD_DATA_WRITE_NOT_AUTHORIZED')
     root = external_root(args.base_dir)
     target = root / 'reports' / 'dashboard.html'
-    require(target.parent.is_dir() and not target.parent.is_symlink(), 'DIRECTORY_UNSAFE')
+    require_safe_directory(target.parent, must_exist=True)
     page = '<!doctype html><html><meta charset="utf-8"><title>Runtime initialization</title><body><h1>Runtime initialization</h1><p>Data read: PASS</p><p>Background tasks: disabled</p><p>Tables: ' + str(report['TOTAL_TABLE_COUNT']) + '</p></body></html>'
     with target.open('x', encoding='utf-8') as stream:
         stream.write(page)

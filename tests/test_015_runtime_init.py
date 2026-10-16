@@ -5,13 +5,16 @@ import io
 import json
 from pathlib import Path
 import sqlite3
+import stat
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from persistence.schema_v1_1 import TEST_SCHEMA_DDL
 from persistence.migration import schema_fingerprint, legacy_digest, schema_inventory
 from persistence.backup import file_sha256
+from windows_compat import marked_reparse_point
 
 spec = importlib.util.spec_from_file_location('runtime_init_015', Path(__file__).resolve().parents[1] / 'tools/015_runtime_init.py')
 gate = importlib.util.module_from_spec(spec)
@@ -143,6 +146,50 @@ class RuntimeInitTests(unittest.TestCase):
         link.symlink_to(self.root, target_is_directory=True)
         self.invoke('015-01', '--base-dir', link / 'nested', success=False, code='DIRECTORY_UNSAFE')
         self.assertFalse((self.root / 'nested').exists())
+
+    def test_reparse_root_and_original_ancestor_rejected(self):
+        self.base.mkdir()
+        for path in (self.base, self.base / 'nested', self.base / '..' / 'other'):
+            with self.subTest(path=path), marked_reparse_point(self.base):
+                self.invoke('015-01', '--base-dir', path, success=False, code='DIRECTORY_UNSAFE')
+        self.assertEqual(list(self.base.iterdir()), [])
+        self.assertFalse((self.root / 'other').exists())
+
+    def test_reparse_runtime_subdirectories_rejected_before_creation(self):
+        for name in ('runtime', 'cache', 'logs', 'reports'):
+            path = self.base / name
+            path.mkdir(parents=True)
+            with self.subTest(name=name), marked_reparse_point(path):
+                self.invoke('015-01', success=False, code='DIRECTORY_UNSAFE')
+            self.assertEqual(list(self.base.iterdir()), [path])
+            path.rmdir()
+
+    def test_dashboard_reparse_reports_directory_rejected_before_write(self):
+        self.invoke('015-01')
+        reports = self.base / 'reports'
+        with marked_reparse_point(reports):
+            self.invoke('015-06', '--dashboard-data-write=yes', success=False, code='DIRECTORY_UNSAFE')
+        self.assertEqual(list(reports.iterdir()), [])
+
+    def test_directory_inspection_errors_fail_closed(self):
+        self.base.mkdir()
+        original_lstat = Path.lstat
+
+        def unreadable(path, *args, **kwargs):
+            if path == self.base:
+                raise PermissionError('synthetic inspection failure')
+            return original_lstat(path, *args, **kwargs)
+
+        with patch.object(Path, 'lstat', new=unreadable):
+            self.invoke('015-01', success=False, code='DIRECTORY_UNSAFE')
+        self.assertEqual(list(self.base.iterdir()), [])
+
+    def test_windows_missing_reparse_metadata_fails_closed(self):
+        with patch.object(gate.sys, 'platform', 'win32'), \
+             patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=stat.S_IFDIR)):
+            with self.assertRaisesRegex(gate.GateError, 'DIRECTORY_UNSAFE'):
+                gate.require_safe_directory(self.base)
+        self.assertFalse(self.base.exists())
 
     def test_security_rejects_mismatch(self):
         args = self.security_args()

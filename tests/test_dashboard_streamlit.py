@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 AVAILABLE = importlib.util.find_spec('streamlit') is not None
 if os.environ.get('REQUIRE_STREAMLIT') == '1' and not AVAILABLE:
@@ -14,15 +15,21 @@ if os.environ.get('REQUIRE_STREAMLIT') == '1' and not AVAILABLE:
 class StreamlitRuntimeTests(unittest.TestCase):
     def setUp(self):
         from streamlit.testing.v1 import AppTest
-        from test_dashboard_runtime import runtime_fixture
+        from test_dashboard_runtime import runtime_inputs
         from windows_compat import use_simulated_directory_fsync
         use_simulated_directory_fsync(self)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.db, self.runtime, self.record = runtime_fixture(temporary.name)
-        self.addCleanup(self.db.close)
+        environment, self.record = runtime_inputs(temporary.name)
+        runtime_environment = patch.dict(os.environ, environment)
+        runtime_environment.start()
+        self.addCleanup(runtime_environment.stop)
         self.at = AppTest.from_file(Path(__file__).resolve().parents[1] / 'dashboard' / 'app.py', default_timeout=60)
-        self.at.session_state['runtime'] = self.runtime
+        self.at.run()
+        self.assertFalse(self.at.exception)
+        self.runtime = self.at.session_state['runtime']
+        self.db = self.runtime.db
+        self.addCleanup(self.db.close)
 
     def test_status_quality_evidence_prompt_and_explicit_prepare_button(self):
         at = self.at.run()

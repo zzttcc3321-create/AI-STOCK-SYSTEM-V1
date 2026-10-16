@@ -1,6 +1,8 @@
 """Serial canonical DB→indicators→Prompt→review→archive orchestration."""
 import copy
 from datetime import datetime, timezone
+from functools import wraps
+from threading import RLock
 
 from analysis import AnalysisPackageBuilder, PromptBuilder, AnalysisRunner, ConfirmationFlow, finalize_analysis
 from analysis.indicator_calculator import IndicatorCalculator
@@ -13,6 +15,15 @@ from persistence.repository import SQLitePersistenceRepository
 
 class RuntimeErrorV1(ValueError):
     pass
+
+
+def serialized_operation(method):
+    @wraps(method)
+    def serialized(self, *args, **kwargs):
+        # Hold through reads, write authorization, commit/rollback and state updates.
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return serialized
 
 
 def record_from_archive(value):
@@ -42,6 +53,7 @@ class RecordingExecutor:
 
 class DashboardRuntime:
     def __init__(self, db, *, archive_writer, executor=None):
+        self._lock = RLock()
         self.db = db
         self.writer = archive_writer
         self.executor = executor
@@ -58,6 +70,7 @@ class DashboardRuntime:
         self.status = state
         self.history.append(state)
 
+    @serialized_operation
     def prepare(self, evidence_id):
         if self.flow is not None:
             raise RuntimeErrorV1('ACTIVE_REVIEW_EXISTS')
@@ -82,6 +95,7 @@ class DashboardRuntime:
         self._stage('READY_FOR_REVIEW')
 
     @property
+    @serialized_operation
     def data_status(self):
         if self.prompt is None:
             return 'PARTIAL'
@@ -89,6 +103,7 @@ class DashboardRuntime:
         return ('PASS' if quality['data_quality_status'] == 'PASS' and quality['complete_analysis_input'] and
                 self.indicators['DATA_STATUS'] == 'PASS' else 'PARTIAL')
 
+    @serialized_operation
     def generate(self, *, actor_id):
         if self.prompt is None or self.executor is None or self.flow is not None:
             raise RuntimeErrorV1('MODEL_EXECUTOR_OR_INPUT_UNAVAILABLE')
@@ -104,6 +119,7 @@ class DashboardRuntime:
         self.flow = flow
         self.repo.update_task_status(flow.run_evidence.analysis_run_id, 'READY_FOR_REVIEW')
 
+    @serialized_operation
     def decide(self, target, reason_code, *, actor_id, reject=False, reason=''):
         if self.flow is None or self.prepared is not None or self.final is not None:
             raise RuntimeErrorV1('REVIEW_UNAVAILABLE')
@@ -113,6 +129,7 @@ class DashboardRuntime:
         self.repo.persist_confirmation_progress(candidate_flow)
         self.flow = candidate_flow
 
+    @serialized_operation
     def prepare_archive(self):
         if self.flow is None or self.prepared is not None:
             raise RuntimeErrorV1('REVIEW_UNAVAILABLE')
@@ -121,6 +138,7 @@ class DashboardRuntime:
         self.repo.persist_confirmation_progress(candidate_flow, prepared=candidate)
         self.flow, self.prepared = candidate_flow, candidate
 
+    @serialized_operation
     def confirm_and_archive(self, *, actor_id):
         if self.final is not None:
             return self.final
