@@ -128,4 +128,4 @@ def apply_migration(db, *, require_legacy_32=False):
         checks(db)
         return "APPLIED"
 
-    return transaction(db, apply)
+    return transaction(db, apply, _migration=True)
