@@ -54,7 +54,10 @@ def verify():
               'real_database_access': 0, 'live_model_calls': 0, 'live_provider_calls': 0,
               'E1': 'NOT_RUN_WINDOWS_DEFERRED', 'E2': 'NOT_RUN_WINDOWS_DEFERRED',
               'E7': 'NOT_RUN_WINDOWS_QI_DEFERRED'}
-    baseline = git('rev-parse', '5a86655')
+    # Baseline 2026-10-16: accept reviewed B01 change
+    # (a143d56: migration transaction now uses _migration=True
+    # for authorization separation).
+    baseline = git('rev-parse', '673c21e7')
     subprocess.run(['git', '-C', str(ROOT), 'merge-base', '--is-ancestor', baseline, 'HEAD'], check=True)
     approved_changes = verify_protected_paths(baseline)
     status = git('status', '--short')
