@@ -15,7 +15,9 @@ def create_runtime():
     if selector:
         module, function = selector.split(':', 1)
         executor = getattr(importlib.import_module(module), function)()
-    db = open_database(db_path)
+    # Streamlit retains this runtime across reruns on different script threads.
+    # DashboardRuntime serializes complete operations on the shared connection.
+    db = open_database(db_path, check_same_thread=False)
     try:
         return DashboardRuntime(db, archive_writer=ArchiveWriter(archive_root), executor=executor)
     except BaseException:

@@ -197,8 +197,13 @@ class _Context:
                         if value is not None:
                             times.add(value)
         if "holding_position" in input_refs:
-            _require(self.inputs["holding_position"] is not None, "holding reference is absent from prompt")
-            times.add(self.inputs["holding_position"]["records"][0]["data"]["snapshot_time"])
+            holding = self.inputs["holding_position"]
+            _require(holding is not None, "holding reference is absent from prompt")
+            # The historical gate preserves the holding block but excludes a
+            # snapshot after cutoff. Such a reference is an output violation,
+            # handled by the runner's existing OUTPUT_INVALID boundary.
+            _require(bool(holding["records"]), "holding reference has no retained snapshot")
+            times.add(holding["records"][0]["data"]["snapshot_time"])
         if not times:
             return {"start": None, "end": None}
         def clock(value: str) -> datetime:
