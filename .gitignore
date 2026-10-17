@@ -12,6 +12,9 @@ config/production.*
 *position*
 *portfolio*
 
+# Reviewed source code only; holding data remains ignored.
+!tools/015_05_holding_config_write.py
+
 # Databases
 *.db
 *.sqlite*

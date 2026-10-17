@@ -1,136 +1,191 @@
-# 015 Phase C engineering prep — stopped on missing contracts
+# 015 Phase C engineering prep — commander contracts implemented
 
 ```text
-TASK_ID=AI-STOCK-V1-015-RUNTIME-INITIALIZATION-PREP
-BASE_COMMIT=61597e8a9273c0384b5ff393687bef672589bb55
+TASK_ID=AI-STOCK-V1-015-RUNTIME-INITIALIZATION-PREP-RESUME
+RESUME_COMMIT=e1a1f71
 BRANCH=feat/015-phase-c-prep
-PREP_STATUS=BLOCKED_MISSING_STORAGE_CONTRACTS
+SCRIPT_IMPLEMENTATION=COMPLETE
+SCRATCH_DB_REHEARSAL=PASS
+PHASE_C_TESTS=65_PASS
+FULL_TEST_SUITE=1135_PASS
+REVIEW_B=REQUIRED_PENDING
 REAL_DB_WRITE=NOT_STARTED
 REAL_DB_CONNECTION=NOT_STARTED
-SCRIPT_IMPLEMENTATION=NOT_STARTED
-SCRATCH_DB_REHEARSAL=NOT_STARTED
 ```
 
-This report records a fail-stop during repository inspection on Linux. No real
-database was located, connected to, or modified. No Windows database path was
-used, and no attempt was made to reach that machine. No holding data was read,
-generated, logged, or committed. No database, config, backup, or runtime output
-was created. The requested three scripts and their new tests have **not** been
-implemented; this is a blocker report, not completion evidence.
+The commander supplied all three storage contracts, replacing the blockers
+recorded in `e1a1f71`. Work continued on the existing branch. Every database
+execution for this task used synthetic SQLite databases under `/tmp` or in
+memory. No real Windows fact DB, selector, holding data, provider, LLM, scheduler,
+or remote DB connection was accessed. GitHub delivery is separate from the
+offline script runtime.
 
-The task explicitly requires: “If any requirement is ambiguous or conflicts
-with a safety rule, STOP, document the conflict in the report, and do not guess.”
-That instruction governs this stop. The current task authorizes engineering prep
-and synthetic scratch writes; older documents' historical restrictions are not
-being treated as a reason to request that authorization again. The unresolved
-issue is the storage contract needed to implement the requested writes safely.
+## Review A — implementation facts
 
-## Findings requiring resolution
+`CHANGE_SCOPE` and `CODE_DIFF_SUMMARY` are listed below.
+`STATIC_ANALYSIS_RESULT=PASS`: all six Python files parse, and staged/unstaged
+`git diff --check` is clean. `TEST_RESULT` is recorded in the verification section.
 
-| Step | Repository evidence | Unresolved contract and safety consequence |
-| --- | --- | --- |
-| 015-04 securities master import | [DB Schema V1.0 §2.2](../frozen/DB_SCHEMA_V1.0.md#22-stocks) lists logical stock fields but says no physical securities master was identified. [V1.1](../frozen/DB_SCHEMA_V1.1.md) explicitly excludes adding `stocks`; its [table definitions](../../persistence/schema_v1_1.py) and [migration definition](../../migration/003_db_schema_v1_1_additive.sql) add only seven analysis/evidence tables. [Phase A capability mapping](015_RUNTIME_INITIALIZATION_RUNBOOK.md#能力映射与复用) implements input validation only. | No established existing target table, source-to-column mapping, or PK/unique contract for this import was found. Creating a `stocks`/`security_master` table would violate this task's no-schema-change rule. Choosing an unrelated legacy table or inventing a scratch-only schema would not establish compatibility with the later Windows execution. |
-| 015-05 holding config write | [Phase A 015-05](015_RUNTIME_INITIALIZATION_RUNBOOK.md#015-05--需-qi-单独授权默认不执行) validates `stock_code/shares/cost/date` and explicitly does not persist them. [Analysis package input contract](../ANALYSIS_PACKAGE_007.md) instead accepts `stock_id/quantity/cost_price/snapshot_time`; it does not define a config-file carrier. | The source and config document shapes, stock identity/date semantics, record key, and merge/replacement policy are unspecified. Choosing these could overwrite unrelated config or silently change holding semantics. A config-file implementation is allowed by the task, but its contract still needs to be supplied. |
-| 015-06 dashboard seed | [Phase A 015-06](015_RUNTIME_INITIALIZATION_RUNBOOK.md#015-06--需-qi-单独授权默认不执行) writes only `reports/dashboard.html`, containing check status and table count. [Dashboard runtime](../DASHBOARD_RUNTIME_014_R1.md) requires an existing Schema B DB and canonical Evidence; it defines no dashboard seed table or transformation. | The seed destination and the mapping from existing DB records to seed records are unspecified. Selecting analysis/evidence tables would risk fabricating analysis or confirmation records; introducing a seed table would violate the schema rule. The existing static HTML output cannot be assumed to satisfy the new seed-data request. |
-
-These findings describe available repository contracts, **not** an inspection of
-the real database. A later schema may exist outside the repository; none was
-assumed or sought on the Windows machine.
-
-## Whitelist and output status
-
-No execution whitelist has been invented or activated.
-
-| Step | Writable tables | Writable paths |
-| --- | --- | --- |
-| 015-04 | Unresolved; no table writes permitted during this stop | Future explicit `--target-db` and snapshots in `--backup-dir`; no paths selected or opened |
-| 015-05 | None if the config-file option is confirmed; DB alternative unresolved | Future explicit `--config-file` and its snapshots; carrier format unresolved and no paths selected or opened |
-| 015-06 | Unresolved; no table writes permitted during this stop | Seed destination unresolved; no paths selected or opened |
-
-The only task artifact is this report. Git commit/push and a draft PR are delivery
-operations authorized by the task, separate from script runtime operations.
-No providers, LLMs, schedulers, startup code, or runtime factories were invoked.
-
-## Authorization and safety specification retained for implementation
-
-| Script | Required exact `--auth-flag` value |
+| File | Responsibility |
 | --- | --- |
-| `tools/015_04_security_master_import.py` | `SECURITY_MASTER_IMPORT=YES` |
-| `tools/015_05_holding_config_write.py` | `HOLDING_CONFIG_WRITE=YES` |
-| `tools/015_06_dashboard_seed.py` | `DASHBOARD_INITIAL_DATA_WRITE=YES` |
+| `tools/015_04_security_master_import.py` | Authorized insert-or-skip full security snapshot import. |
+| `tools/015_05_holding_config_write.py` | Authorized atomic full replacement of holdings and three metadata rows. |
+| `tools/015_06_dashboard_seed.py` | Authorized deterministic in-DB projection and append-only batches. |
+| `tools/phase_c_safety.py` | CLI, path/auth/hash gates, memory rehearsal, SQL authorizer, snapshots, transactions, rollback and schema verification. |
+| `tools/phase_c_contracts.py` | Canonical columns/DDL, whole-file validation, transformations and post-write checks. |
+| `tests/test_015_phase_c_prep.py` | Synthetic contract, safety, rollback and privacy regressions. |
+| `.gitignore` | One exact exception for the holding script; data, CSVs, DBs, snapshots and logs remain ignored. |
 
-Each invocation, including dry-run and any retry, must require a freshly
-reconfirmed flag. Missing/wrong flags must refuse with the expected flag name,
-return nonzero, and change nothing. Flags must not be remembered as continuing
-authorization. Re-import must be idempotent; any non-idempotent repeat must refuse
-unless `--force-reaffirm` and the exact flag are both supplied.
+No existing runtime module, frozen schema, migration or production data was
+changed. The prep tools do not call runtime factories or persistence services.
+They reuse the C01-fixed `require_safe_directory()` for directory validation
+and every backup-directory creation.
 
-After the storage contracts are resolved, implementation must enforce absolute
-paths, explicit table/path whitelists, expected target DB SHA256 before writes,
-verified pre-write snapshots, unchanged schema fingerprint after writes, and
-rollback/restoration on failure. Directory creation must use the existing
-C01-fixed `require_safe_directory()` in `tools/015_runtime_init.py`. A config-file
-write must snapshot the existing carrier first. Dry-run must validate the entire
-operation and leave files and directories unchanged. Planned holding writes and
-evidence may expose only row counts and digests, never holding details. All
-script operations must be offline with no LLM or scheduler activity.
+## Contract binding and Review B
 
-These are requirements, not claims of implemented or tested behavior.
+Table and field names are **canonical per commander**, not inferred mappings to
+the historical repository schema. **Review B must bind these names, constraints,
+PKs, defaults, indexes and triggers against the real schema before any later
+real execution.** This report does not claim that binding has occurred.
 
-## Inspection and verification evidence
+- `security_master` is assumed to exist in the baseline. Script code never
+  issues its CREATE; only synthetic fixture setup creates it. Missing tables
+  fail even in dry-run. Schema validation checks columns, defaults, required
+  CHECK constraints, composite PK and absence of extra unique constraints.
+  SQL comments cannot impersonate CHECK constraints.
+- The only schema additions are the four supplied tables, two per step below.
+  Their CREATE statements are verbatim in `DDL_BY_STEP`. **Review B must approve
+  these additions.** Existing tables must match the canonical definitions; the
+  scripts do not migrate them. The schema inventory/fingerprint verifier permits
+  only new canonical tables and their implicit PK indexes and preserves every
+  pre-existing schema object.
+- 015-04 cannot delete or update securities. A target key absent from the full
+  source snapshot therefore fails the count requirement before live writes.
+  Changed fields and duplicate keys fail the batch. Post-write field comparison
+  covers every row, exceeding the requested spot check. Blank currency becomes
+  `CNY`; blank list date becomes SQL NULL. Names need not be unique.
+- 015-05 applies the explicit SKIP rule to normalized PK/quantity/cost data and
+  `as_of_date`. Reordered/reformatted identical data does not write metadata:
+  the committed source SHA remains provenance of the last applied snapshot.
+  A replacement stores the new source SHA and exactly `as_of_date`,
+  `version=1.0`, and `source_sha256`, removing obsolete metadata. Empty sources
+  clear holdings. Missing/delisted securities fail before DDL.
+- 015-06 derives batch IDs only from stored date/SHA. Existing batches are
+  verified and skipped; new batches use the ordered composite-key join and
+  preserve older batches. New snapshot counts equal holding counts; overview
+  totals match both exact integer-cent arithmetic and SQLite's rounded SUM.
+  Empty holdings create one zero overview and no snapshots. Latest-batch ordering
+  is `ORDER BY as_of_date DESC, batch_id DESC LIMIT 1`; no dashboard UI/read
+  model is changed by this seed-only task.
+- Monetary arithmetic uses integer cents and checks decimal-cent round trips
+  through SQLite REAL. Values SQLite cannot represent/aggregate to the required
+  cents fail rather than silently round. Integers must fit signed 64-bit storage.
 
-Initial repository checks:
+Validation covers local POSIX dev-box paths and rollback-journal SQLite files.
+Symlinks, reparse points, hard links, repository runtime paths, network-style
+paths, WAL-format DBs and existing SQLite sidecars are refused. Windows
+path/platform binding remains part of later reviewed execution; this prep does
+not authorize access to that machine.
 
-```console
-$ git status --short
-(empty)
-$ git branch --show-current
-feat/015-phase-c-prep
-$ git rev-parse HEAD
-61597e8a9273c0384b5ff393687bef672589bb55
-$ git rev-parse main
-61597e8a9273c0384b5ff393687bef672589bb55
-```
+## Per-step whitelist
 
-The requested branch already existed at the exact requested main baseline;
-no reset or branch replacement was needed. Read-only inspection covered the
-Phase A/B tools and evidence, frozen V1.0/V1.1 schema, compatibility mapping,
-the additive migration, persistence utilities, and dashboard code/docs. An
-independent read-only audit confirmed all three missing contracts, including
-V1.1's explicit exclusion of `stocks`. No code was executed against a database.
+| Step / exact `--auth-flag` | Business tables read | Permitted mutations | Permitted DDL |
+| --- | --- | --- | --- |
+| 015-04 / `SECURITY_MASTER_IMPORT=YES` | `security_master` | `security_master`: INSERT only | None |
+| 015-05 / `HOLDING_CONFIG_WRITE=YES` | `security_master`, `holding_config`, `holding_config_meta` | `holding_config`: DELETE/INSERT; `holding_config_meta`: DELETE obsolete keys, INSERT/UPSERT | Verbatim CREATE IF NOT EXISTS for `holding_config`, `holding_config_meta` only |
+| 015-06 / `DASHBOARD_INITIAL_DATA_WRITE=YES` | `security_master`, `holding_config`, `holding_config_meta`, both dashboard tables | Both dashboard tables: INSERT only | Verbatim CREATE IF NOT EXISTS for `dashboard_position_snapshot`, `dashboard_overview` only |
+
+Schema inspection and integrity checks are allowed. Trigger/view-origin
+operations, unlisted tables, ATTACH, arbitrary DDL, time/random functions and
+unapproved PRAGMAs are denied. Exact-statement DDL authorization, SQLite's
+operation authorizer and independent schema-delta verification all apply.
+
+The filesystem write whitelist is the explicit absolute `--target-db`, its
+transient SQLite rollback journal, and the verified preimage
+`<backup-dir>/<step>-<expected-db-sha256>.sqlite`. Missing backup-directory
+components are created through the safe-directory helper. Sources are read-only;
+scripts create no config, report, log, provider or LLM artifacts. Diagnostics
+contain fixed status/error codes, aggregate row counts, date and SHA only,
+never source paths, symbols, names, quantities or costs.
+
+Every invocation requires the exact auth value and target SHA256. Wrong/missing
+authorization or hash refuses before writes or directory creation. Each script
+rehearses the operation in memory, then locks the target with `BEGIN EXCLUSIVE`,
+rechecks identity/hash, verifies a byte-identical pre-write snapshot, performs
+one transaction, verifies data/schema/integrity and commits. Failures roll back
+DDL and DML together and verify the restored target SHA. No step runner
+continues after failure.
+
+`--dry-run` performs validation, DDL and projection only in the memory clone,
+then rolls it back. It never opens the target writable or creates backups.
+Reports say `DRY_RUN_VALIDATED`, `changed=0`, with planned counts separately
+named. Identical repeats report `IDEMPOTENT_NOOP`, `changed=0`, without a new
+snapshot.
+
+## Scratch rehearsal evidence — 2026-10-17
+
+Fresh root: `/tmp/015-phase-c-prep-resume-20261017-321999`. The harness used the
+synthetic fixtures from `tests/test_015_phase_c_prep.py`. Only fixture setup
+created baseline `security_master` in this scratch DB. CSVs, snapshots and
+restore DBs remain outside Git; no position details appear in this evidence.
+
+Each CLI call used absolute `--target-db`, `--backup-dir` and `--source` paths
+(where applicable), the exact flag, and a freshly calculated
+`--expected-db-sha256`. 015-05 used `--as-of-date 2026-10-16`. Each step ran
+dry-run, scratch apply and identical repeat before advancing.
+
+| Step | Dry-run status / actual changed | Validated rows | Scratch apply | Repeat |
+| --- | --- | --- | --- | --- |
+| 015-04 | DRY_RUN_VALIDATED / 0 | 2 | PASS, inserted=2 | IDEMPOTENT_NOOP, skipped=2, changed=0 |
+| 015-05 | DRY_RUN_VALIDATED / 0 | 2 | PASS, inserted=2, deleted=0 | IDEMPOTENT_NOOP, changed=0 |
+| 015-06 | DRY_RUN_VALIDATED / 0 | 2 | PASS, changed=3 | IDEMPOTENT_NOOP, changed=0 |
+
+Before/after dry-run target SHA256 pairs were identical:
 
 ```text
-015-04_DRY_RUN=NOT_RUN_BLOCKED
-015-05_DRY_RUN=NOT_RUN_BLOCKED
-015-06_DRY_RUN=NOT_RUN_BLOCKED
-NEW_TESTS=NOT_IMPLEMENTED_BLOCKED
-TEST_SUITE=NOT_RUN_DOCUMENTATION_ONLY_STOP
-DIFF_CHECK=PASS
+015-04=cce577054698840aafbbd70258a4eab1daf088ce8c84e1f49772addb3789f950
+015-05=e622fbe3268c6343921e62a730cd7314eac012303358fa39dc01ee07a37730f7
+015-06=3f46e35d48a85c86f471ae0fffa1d9f2a4614b6737991ff12438ad3b83b36382
+MASTER_SOURCE_SHA256=7ab83dc8e25effc40bc90815f9d4540e59ee6c8a73ad12118f597efa34424463
+HOLDING_SOURCE_SHA256=cf602fb1362fa1bf572015d698088a7fa97760921deb40e29ef5976b48680362
+AS_OF_DATE=2026-10-16
+DRY_RUN_DIRECTORY_INVENTORY_UNCHANGED=PASS_ALL_3
+REPEAT_DIRECTORY_INVENTORY_UNCHANGED=PASS_ALL_3
+PREWRITE_SNAPSHOT_HASH_MATCH=PASS_ALL_3
+RESTORED_SNAPSHOT_HASH_AND_INTEGRITY=PASS_ALL_3
+REAL_DB_WRITE=NOT_STARTED
+REAL_DB_CONNECTION=NOT_STARTED
 ```
 
-There are no execution commands/outputs to present as dry-run evidence. No
-scratch SQLite schema was invented to make tests pass. Required future tests
-remain: wrong/missing authorization, non-whitelisted writes (including indirect
-writes), duplicate-free repeat import, unchanged dry-run state, snapshot recovery
-after simulated failure, holding redaction, and detection of undeclared files.
+For each apply, the harness compared the snapshot to the pre-write hash, copied
+it to a separate scratch restore DB, and checked its hash and
+`PRAGMA integrity_check`. Every dry-run/repeat comparison covered all scratch
+directory entries and file hashes, not just the target DB.
 
-## Information needed to resume
+## Verification and remaining review
 
-Supply non-sensitive contracts only; no real DB, real selector, or holding data
-is needed on this machine:
+The 65 Phase C tests cover exact auth/hash gates; required/absolute/unsafe paths;
+CSV header, enum, empty, quantity, decimal, duplicate and conflict cases;
+canonical schema and DDL fences; replacement/empty holdings; ordered exact
+projection/empty dashboards; idempotency; DB changes between rehearsal and apply;
+dry-run with no filesystem changes; no network/LLM calls; redacted success and
+failure; pre-write snapshots; and restoration after injected live DML, replace
+and DDL failures. Trigger writes and spoofed CHECK comments are rejected.
 
-1. **015-04:** existing destination table DDL (columns, constraints, indexes,
-   relevant triggers), offline input format and exact field mapping, record key,
-   and policy for an existing key with changed values. If no compatible table
-   exists, resolve that in a separately authorized schema task or revise this
-   task's scope; these scripts must never create or migrate it.
-2. **015-05:** source/config structure, identifier and date semantics, record key,
-   and merge versus replacement rules, including preservation of unrelated
-   config. Confirm the file carrier or specify an existing DB mapping.
-3. **015-06:** exact seed destination tables or file and deterministic projection
-   from existing DB data, including empty-input and repeat-run behavior.
+```console
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_015_phase_c_prep
+Ran 65 tests in 27.254s
+OK
+$ PYTHONDONTWRITEBYTECODE=1 REQUIRE_STREAMLIT=1 python3 -m unittest discover -s tests -v
+Ran 1135 tests in 596.014s
+OK
+$ git diff --check
+(clean)
+```
 
-Once those contracts are supplied, scratch fixtures can reproduce them under
-`/tmp`, using obviously synthetic data, and implementation/testing can resume.
-Real execution remains a separate action by qi on Windows with per-step
-authorization.
+`IMPACT_ANALYSIS`: new offline prep tools only; no live operational change.
+`RISK_FOUND`: physical schema compatibility and Windows execution are
+unverified; the two per-step table additions require Review B approval.
+`REVIEW_B=REQUIRED_PENDING`; these are code facts, not an approval. PR #49
+remains draft. Real execution is a separate reviewed action requiring fresh
+per-step authorization. `REAL_DB_WRITE=NOT_STARTED`.
