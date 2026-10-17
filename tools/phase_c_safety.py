@@ -2,6 +2,8 @@
 
 Only the named target, its rollback journal, and a verified preimage in the
 explicit backup directory may be written. Dry runs execute on a memory clone.
+Successful non-dry runs emit POST_WRITE_SHA256 after closing SQLite; runners
+must pass that value as the next step's --expected-db-sha256.
 """
 from __future__ import annotations
 
@@ -334,7 +336,18 @@ def main(step, argv=None):
                 if key in result:
                     result['planned_' + key] = result.pop(key)
             result.update(status='DRY_RUN_VALIDATED', changed=0)
+        post_write_sha256 = None
+        if not args.dry_run:
+            # apply() and memory_preflight() have closed all SQLite connections.
+            # No-op successes also provide a handoff, but must remain unchanged.
+            safe_path(path)
+            check_sidecars(path)
+            post_write_sha256 = file_sha256(path)
+            if result.get('status') == 'IDEMPOTENT_NOOP':
+                require(post_write_sha256 == args.expected_db_sha256, 'DATABASE_HASH_MISMATCH')
         print(json.dumps({'step': step, 'result': 'PASS', 'dry_run': args.dry_run, **result}, sort_keys=True))
+        if post_write_sha256 is not None:
+            print('POST_WRITE_SHA256=' + post_write_sha256)
         return 0
     except Exception as exc:
         code = str(exc) if isinstance(exc, GateError) and re.fullmatch('[A-Z0-9_]+', str(exc)) else 'VALIDATION_OR_WRITE_FAILED'

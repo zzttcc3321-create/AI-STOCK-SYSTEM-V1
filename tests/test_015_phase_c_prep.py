@@ -172,6 +172,28 @@ class PhaseCPrepTests(unittest.TestCase):
                           'PRIVATE_POSITION_SOURCE', '947031', '123.47', '116929917.57'):
             self.assertNotIn(sensitive, output, 'CLI leaked synthetic position/source details')
 
+    def parse_output(self, stdout, *, success, dry=False):
+        # The value-free JSON report remains first. Only successful non-dry
+        # invocations publish the hash that a runner may hand to the next step.
+        lines = stdout.splitlines()
+        handoff_expected = success and not dry
+        self.assertEqual(len(lines), 2 if handoff_expected else 1, stdout)
+        report = json.loads(lines[0])
+        self.assertEqual(report['result'], 'PASS' if success else 'FAIL')
+        if handoff_expected:
+            self.assertRegex(lines[1], r'^POST_WRITE_SHA256=[0-9a-f]{64}$')
+            self.assertEqual(lines[1].split('=', 1)[1], sha(self.db))
+        else:
+            self.assertNotIn('POST_WRITE_SHA256=', stdout)
+        if not success:
+            self.assertTrue(report.get('error_code') or report.get('error'))
+        return report
+
+    def handoff_hash(self, output):
+        lines = [line for line in output.splitlines() if line.startswith('POST_WRITE_SHA256=')]
+        self.assertEqual(len(lines), 1, output)
+        return lines[0].split('=', 1)[1]
+
     def invoke(self, step, *, success=True, **kwargs):
         result = subprocess.run([sys.executable, str(SCRIPTS[step]), *self.argv(step, **kwargs)],
                                 cwd=ROOT, capture_output=True, text=True,
@@ -181,13 +203,7 @@ class PhaseCPrepTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         else:
             self.assertNotEqual(result.returncode, 0, 'Unexpected success')
-        # The CLI contract gives one value-free JSON report, including parse failures.
-        lines = result.stdout.splitlines()
-        self.assertEqual(len(lines), 1, result.stdout + result.stderr)
-        report = json.loads(lines[0])
-        self.assertEqual(report['result'], 'PASS' if success else 'FAIL')
-        if not success:
-            self.assertTrue(report.get('error_code') or report.get('error'))
+        report = self.parse_output(result.stdout, success=success, dry=kwargs.get('dry', False))
         return report, result.stdout + result.stderr
 
     def invoke_direct(self, step, *, success=True, **kwargs):
@@ -198,8 +214,7 @@ class PhaseCPrepTests(unittest.TestCase):
         raw = output.getvalue() + errors.getvalue()
         self.assert_redacted(raw)
         self.assertEqual(result, 0 if success else 1, raw)
-        report = json.loads(output.getvalue())
-        self.assertEqual(report['result'], 'PASS' if success else 'FAIL')
+        report = self.parse_output(output.getvalue(), success=success, dry=kwargs.get('dry', False))
         return report, raw
 
     def assert_refused_unchanged(self, step, **kwargs):
@@ -242,6 +257,62 @@ class PhaseCPrepTests(unittest.TestCase):
                 with self.subTest(step=step):
                     self.assert_refused_unchanged(step, expected_hash=expected_hash)
                     self.assertFalse(self.backups.exists())
+
+    def test_full_cli_chain_uses_previous_post_write_hash_and_noop_handoffs(self):
+        expected = sha(self.db)
+        for step in SCRIPTS:
+            with self.subTest(step=step):
+                report, output = self.invoke(step, expected_hash=expected)
+                self.assertEqual(report['status'], 'APPLIED')
+                post_write = self.handoff_hash(output)
+                self.assertNotEqual(post_write, expected)
+                before_noop = self.files()
+                report, output = self.invoke(step, expected_hash=post_write)
+                self.assertEqual(report['status'], 'IDEMPOTENT_NOOP')
+                expected = self.handoff_hash(output)
+                self.assertEqual(expected, post_write)
+                self.assertEqual(self.files(), before_noop)
+                self.invoke(step, expected_hash=expected, dry=True)
+                self.assertEqual(self.files(), before_noop)
+        self.assertEqual(self.query('SELECT COUNT(*) FROM security_master'), [(len(MASTER_ROWS),)])
+        self.assertEqual(self.query('SELECT COUNT(*) FROM holding_config'), [(len(HOLDING_ROWS),)])
+        self.assertEqual(self.query('SELECT COUNT(*) FROM dashboard_position_snapshot'),
+                         [(len(HOLDING_ROWS),)])
+        self.assertEqual(self.query('SELECT COUNT(*) FROM dashboard_overview'), [(1,)])
+
+    def test_chain_rejects_stale_or_tampered_handoff_at_both_boundaries(self):
+        expected = sha(self.db)
+        for step, next_step in (('015-04', '015-05'), ('015-05', '015-06')):
+            report, output = self.invoke(step, expected_hash=expected)
+            self.assertEqual(report['status'], 'APPLIED')
+            handoff = self.handoff_hash(output)
+            tampered = ('0' if handoff[0] != '0' else '1') + handoff[1:]
+            for invalid in (expected, tampered):
+                with self.subTest(boundary=step + ' -> ' + next_step):
+                    before = self.files()
+                    report, _ = self.assert_refused_unchanged(next_step, expected_hash=invalid)
+                    self.assertEqual(report['error'], 'DATABASE_HASH_MISMATCH')
+                    self.assertEqual(self.files(), before)
+            expected = handoff
+        self.invoke('015-06', expected_hash=expected)
+
+    def test_chain_rejects_database_tampering_between_steps(self):
+        baseline = self.db.read_bytes()
+        for boundary in ('015-04', '015-05'):
+            with self.subTest(boundary=boundary):
+                self.db.write_bytes(baseline)
+                expected = sha(self.db)
+                for step in SCRIPTS:
+                    _, output = self.invoke(step, expected_hash=expected)
+                    expected = self.handoff_hash(output)
+                    if step == boundary:
+                        break
+                self.mutate("INSERT INTO unrelated_fixture VALUES ('synthetic between-step change')")
+                before = self.files()
+                next_step = '015-05' if boundary == '015-04' else '015-06'
+                report, _ = self.assert_refused_unchanged(next_step, expected_hash=expected)
+                self.assertEqual(report['error'], 'DATABASE_HASH_MISMATCH')
+                self.assertEqual(self.files(), before)
 
     def test_required_arguments_cannot_be_omitted_or_create_files(self):
         for step in SCRIPTS:
@@ -945,6 +1016,28 @@ class PhaseCPrepTests(unittest.TestCase):
                 self.assertEqual(len(external_state), 1)
                 self.assertEqual(self.db.read_bytes(), external_state[0])
                 self.assertFalse(self.backups.exists())
+
+    def test_noop_hash_change_after_preflight_never_emits_success_handoff(self):
+        safety = importlib.import_module('tools.phase_c_safety')
+        original = safety.memory_preflight
+        for step in SCRIPTS:
+            self.invoke(step)
+        for step in SCRIPTS:
+            with self.subTest(step=step):
+                external_state = []
+
+                def mutate_after_preflight(*args):
+                    result = original(*args)
+                    self.assertEqual(result['status'], 'IDEMPOTENT_NOOP')
+                    self.mutate("INSERT INTO unrelated_fixture VALUES ('synthetic no-op race')")
+                    external_state.append(self.files())
+                    return result
+
+                with patch.object(safety, 'memory_preflight', side_effect=mutate_after_preflight):
+                    report, _ = self.invoke_direct(step, success=False)
+                self.assertEqual(report['error'], 'DATABASE_HASH_MISMATCH')
+                self.assertEqual(len(external_state), 1)
+                self.assertEqual(self.files(), external_state[0])
 
     def test_live_holding_replace_failure_restores_old_positions_and_metadata(self):
         safety = importlib.import_module('tools.phase_c_safety')

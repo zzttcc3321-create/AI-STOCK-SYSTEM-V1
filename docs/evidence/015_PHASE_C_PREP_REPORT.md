@@ -1,14 +1,17 @@
-# 015 Phase C engineering prep — commander contracts implemented
+# 015 Phase C engineering prep — remediation partially blocked
 
 ```text
-TASK_ID=AI-STOCK-V1-015-RUNTIME-INITIALIZATION-PREP-RESUME
-RESUME_COMMIT=e1a1f71
+TASK_ID=AI-STOCK-V1-015-PHASE-C-REMEDIATION
+RESUME_COMMIT=bdd552e
 BRANCH=feat/015-phase-c-prep
-SCRIPT_IMPLEMENTATION=COMPLETE
+REMEDIATION_STATUS=PARTIAL_FAIL_STOP
+ITEM_1_SCHEMA_BINDING=BLOCKED_MISSING_SCHEMA_DETAILS
+ITEM_2_CREATE_SHA256_ENFORCEMENT=BLOCKED_DEPENDS_ON_ITEM_1
+ITEM_3_HASH_HANDOFF=IMPLEMENTED
 SCRATCH_DB_REHEARSAL=PASS
-PHASE_C_TESTS=65_PASS
-FULL_TEST_SUITE=1135_PASS
-REVIEW_B=REQUIRED_PENDING
+PHASE_C_TESTS=69_PASS
+FULL_TEST_SUITE=1141_PASS
+REVIEW_B=REQUEST_CHANGES_UNRESOLVED
 REAL_DB_WRITE=NOT_STARTED
 REAL_DB_CONNECTION=NOT_STARTED
 ```
@@ -19,6 +22,85 @@ execution for this task used synthetic SQLite databases under `/tmp` or in
 memory. No real Windows fact DB, selector, holding data, provider, LLM, scheduler,
 or remote DB connection was accessed. GitHub delivery is separate from the
 offline script runtime.
+
+## Review B remediation — 2026-10-17
+
+Continued from `bdd552e` on `feat/015-phase-c-prep`; the previously approved
+contract implementation is retained. The three requested items have these
+outcomes:
+
+| Item | Outcome | Evidence/change |
+| --- | --- | --- |
+| 1. Real schema binding | **FAIL-STOP: missing evidence** | The specified E7 audit was read first. It contains schema digests but no table list or CREATE/column definitions. Every real mapping and `security_master` existence remain unverified. |
+| 2. CREATE SHA256 locking | **STOPPED: depends on item 1** | The four approved contract texts match existing strings exactly. Their reference SHA256s are recorded; runtime SHA256 enforcement and tamper tests remain outstanding. |
+| 3. Expected DB SHA256 handoff | **Implemented** | Every successful non-dry script invocation prints its post-operation DB hash. Scratch CLI tests pass each emitted hash to the next step and reject stale/tampered handoffs. |
+
+The new [schema binding evidence](015_PHASE_C_SCHEMA_BINDING.md) includes the
+audit's file digest, the exact available schema-digest fields, a field-by-field
+unresolved ledger, the four CREATE hashes, and the evidence required to resume
+items 1 and 2. No canonical name or field was guessed or renamed.
+`tools/phase_c_contracts.py` is intentionally unchanged pending authoritative
+schema evidence. The source audit does not support a claim that
+`security_master` either exists or is absent.
+
+### Runner hash handoff contract
+
+The scripts keep their exact `--auth-flag` gates. `--expected-db-sha256` means
+the hash expected **immediately before this invocation**, with this chain:
+
+| Invocation | `--expected-db-sha256` input | Successful output used next |
+| --- | --- | --- |
+| 015-04 | Independently verified starting DB hash | `POST_WRITE_SHA256=H04` |
+| 015-05 | `H04`, extracted from successful 015-04 stdout | `POST_WRITE_SHA256=H05` |
+| 015-06 | `H05`, extracted from successful 015-05 stdout | `POST_WRITE_SHA256=H06` |
+
+`H04`/`H05`/`H06` above represent 64 lowercase hexadecimal characters. The
+runner must require exit code 0, the first stdout line's JSON `result=PASS`
+and `dry_run=false`, and exactly one subsequent line matching
+`^POST_WRITE_SHA256=[0-9a-f]{64}$`. It extracts that line's value and passes
+it unchanged as the next script's `--expected-db-sha256`. Do not reuse the
+initial hash after a write, recalculate a replacement hash to bypass a failed
+handoff, or advance after nonzero exit, missing/malformed handoff, or dry-run.
+The runner retains exclusive operational ownership of the scratch DB during
+the chain; unrelated writes between steps are rejected by the next hash gate.
+
+The first stdout line remains the existing aggregate JSON report; successful
+non-dry invocations now have a second line. Hashing occurs after transaction
+verification/commit and SQLite connection closure, with final safe-path and
+sidecar checks. `IDEMPOTENT_NOOP` also emits the unchanged hash and rechecks it
+against the expected value before success. Dry-runs emit only their JSON report
+and produce no handoff, including dry-run no-ops. Failures produce no handoff.
+If final hash publication fails after a commit, the runner stops and must not
+assume rollback or advance; transaction rollback applies to pre-commit failures.
+
+The updated tests exercise the full 04 -> 05 -> 06 CLI chain on synthetic
+`/tmp` databases, repeated no-ops, dry-runs, stale and altered handoff hashes at
+both boundaries, actual DB mutations between steps, and a mutation after no-op
+preflight. They check refusal leaves the DB/schema/files unchanged and publishes
+no handoff. All CLI helpers also validate emitted hashes against the closed DB
+and retain sensitive-output checks. No real holding details are recorded.
+
+PR #49 remains draft; items 1 and 2 are unresolved. `REAL_DB_WRITE=NOT_STARTED` and
+`REAL_DB_CONNECTION=NOT_STARTED`.
+
+### Remediation validation
+
+```console
+$ python3 -m unittest tests.test_015_phase_c_prep
+Ran 69 tests in 26.888s
+OK
+$ PYTHONDONTWRITEBYTECODE=1 REQUIRE_STREAMLIT=1 TMPDIR=/tmp python3 -m unittest discover -s tests -v
+Ran 1141 tests in 584.104s
+OK
+$ git diff --check
+(clean)
+```
+
+The full repository suite passed with exit code 0. Python AST parsing passes for
+both changed Python files. A separate read-only review confirmed the handoff behavior,
+required regression coverage, all 27 unresolved field bindings, and the four
+CREATE hashes. No schema compatibility or runtime hash-lock completion is
+claimed by passing scratch tests.
 
 ## Review A — implementation facts
 
@@ -54,9 +136,10 @@ real execution.** This report does not claim that binding has occurred.
   CHECK constraints, composite PK and absence of extra unique constraints.
   SQL comments cannot impersonate CHECK constraints.
 - The only schema additions are the four supplied tables, two per step below.
-  Their CREATE statements are verbatim in `DDL_BY_STEP`. **Review B must approve
-  these additions.** Existing tables must match the canonical definitions; the
-  scripts do not migrate them. The schema inventory/fingerprint verifier permits
+  Their CREATE statements are verbatim in `DDL_BY_STEP`. The remediation
+  instruction approves their verbatim locking; the dependent SHA256 enforcement
+  remains blocked as recorded above. Existing tables must match the canonical
+  definitions; the scripts do not migrate them. The schema inventory/fingerprint verifier permits
   only new canonical tables and their implicit PK indexes and preserves every
   pre-existing schema object.
 - 015-04 cannot delete or update securities. A target key absent from the full
@@ -162,7 +245,7 @@ it to a separate scratch restore DB, and checked its hash and
 `PRAGMA integrity_check`. Every dry-run/repeat comparison covered all scratch
 directory entries and file hashes, not just the target DB.
 
-## Verification and remaining review
+## Prior verification at bdd552e
 
 The 65 Phase C tests cover exact auth/hash gates; required/absolute/unsafe paths;
 CSV header, enum, empty, quantity, decimal, duplicate and conflict cases;
@@ -185,7 +268,8 @@ $ git diff --check
 
 `IMPACT_ANALYSIS`: new offline prep tools only; no live operational change.
 `RISK_FOUND`: physical schema compatibility and Windows execution are
-unverified; the two per-step table additions require Review B approval.
-`REVIEW_B=REQUIRED_PENDING`; these are code facts, not an approval. PR #49
+unverified; real schema binding and dependent CREATE SHA256 enforcement remain
+blocked by missing schema evidence.
+`REVIEW_B=REQUEST_CHANGES_UNRESOLVED`; these are code facts, not an approval. PR #49
 remains draft. Real execution is a separate reviewed action requiring fresh
 per-step authorization. `REAL_DB_WRITE=NOT_STARTED`.
