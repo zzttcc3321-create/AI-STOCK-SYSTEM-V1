@@ -1,6 +1,6 @@
 """Phase C contracts, using only synthetic SQLite/CSV fixtures in temporary dirs.
 
-security_master is a baseline assumption: its CREATE below is test setup only.
+security_master is created by 015-04 when absent, using the locked canonical DDL.
 No selector, network connection, or fixture refers to the Windows fact database.
 """
 from contextlib import closing, redirect_stderr, redirect_stdout
@@ -36,17 +36,9 @@ SECURITY_COLUMNS = (
     'list_date', 'status',
 )
 HOLDING_COLUMNS = ('market', 'symbol', 'quantity', 'avg_cost')
-SECURITY_DDL = """CREATE TABLE security_master(
-    market TEXT NOT NULL CHECK(market IN ('SSE','SZSE','BSE')),
-    symbol TEXT NOT NULL,
-    name TEXT NOT NULL,
-    security_type TEXT NOT NULL CHECK(security_type IN ('STOCK','ETF')),
-    lot_size INTEGER NOT NULL CHECK(lot_size > 0),
-    currency TEXT NOT NULL DEFAULT 'CNY',
-    list_date TEXT NULL,
-    status TEXT NOT NULL CHECK(status IN ('LISTED','SUSPENDED','DELISTED')),
-    PRIMARY KEY(market, symbol)
-)"""
+from tools.phase_c_contracts import DDL_BY_STEP
+
+SECURITY_DDL = DDL_BY_STEP['015-04'][0]
 HOLDING_DDL = """CREATE TABLE IF NOT EXISTS holding_config(
     market   TEXT NOT NULL,
     symbol   TEXT NOT NULL,
@@ -259,6 +251,7 @@ class PhaseCPrepTests(unittest.TestCase):
                     self.assertFalse(self.backups.exists())
 
     def test_full_cli_chain_uses_previous_post_write_hash_and_noop_handoffs(self):
+        self.mutate('DROP TABLE security_master')
         expected = sha(self.db)
         for step in SCRIPTS:
             with self.subTest(step=step):
@@ -415,11 +408,45 @@ class PhaseCPrepTests(unittest.TestCase):
             self.assertEqual(self.files(), before)
             self.assertFalse(self.backups.exists())
 
-    def test_dry_run_missing_master_refuses_without_creating_it(self):
+    def test_dry_run_missing_master_rehearses_create_without_filesystem_changes(self):
         self.mutate('DROP TABLE security_master')
-        for dry in (True, False):
-            self.assert_refused_unchanged('015-04', dry=dry)
+        before = self.files()
+        report, _ = self.invoke('015-04', dry=True)
+        self.assertEqual(report['status'], 'DRY_RUN_VALIDATED')
+        self.assertEqual(self.files(), before)
         self.assertNotIn(('security_master',), self.query("SELECT name FROM sqlite_master WHERE type='table'"))
+
+    def test_missing_master_is_created_and_imported_end_to_end(self):
+        self.mutate('DROP TABLE security_master')
+        before_schema = self.schema()
+        before_hash = sha(self.db)
+        report, output = self.invoke('015-04', expected_hash=before_hash)
+        self.assertEqual(report['status'], 'APPLIED')
+        self.assertEqual(report['inserted'], len(MASTER_ROWS))
+        self.assert_schema_only_new_tables(before_schema, {'security_master'})
+        self.assertEqual(tuple(row[1] for row in self.query('PRAGMA table_xinfo(security_master)')),
+                         SECURITY_COLUMNS)
+        expected = [tuple(row[:5] + [row[5] or 'CNY', row[6] or None, row[7]])
+                    for row in MASTER_ROWS]
+        observed = self.query('SELECT * FROM security_master ORDER BY market, symbol')
+        self.assertTrue(observed == [(r[0], r[1], r[2], r[3], int(r[4]), *r[5:])
+                                     for r in expected], 'Imported fields differ from source')
+        self.assertTrue((self.backups / ('015-04-' + before_hash + '.sqlite')).is_file())
+        after = self.files()
+        report, _ = self.invoke('015-04', expected_hash=self.handoff_hash(output))
+        self.assertEqual(report['status'], 'IDEMPOTENT_NOOP')
+        self.assertEqual(self.files(), after)
+
+    def test_missing_master_with_empty_source_still_commits_table_creation(self):
+        self.mutate('DROP TABLE security_master')
+        self.write_csv(self.master, SECURITY_COLUMNS, [])
+        report, _ = self.invoke('015-04')
+        self.assertEqual(report['status'], 'APPLIED')
+        self.assertEqual(self.query('SELECT COUNT(*) FROM security_master'), [(0,)])
+        after = self.files()
+        report, _ = self.invoke('015-04')
+        self.assertEqual(report['status'], 'IDEMPOTENT_NOOP')
+        self.assertEqual(self.files(), after)
 
     def test_dry_run_validates_conflicts_and_invalid_sources(self):
         self.seed_master()
@@ -864,13 +891,13 @@ class PhaseCPrepTests(unittest.TestCase):
 
     def test_security_noncanonical_uniqueness_or_missing_check_is_rejected(self):
         for ddl in (SECURITY_DDL.replace('name TEXT NOT NULL', 'name TEXT NOT NULL UNIQUE'),
-                    SECURITY_DDL.replace(" CHECK(market IN ('SSE','SZSE','BSE'))", '')):
+                    SECURITY_DDL.replace(" CHECK (market IN ('SSE', 'SZSE', 'BSE'))", '')):
             self.mutate('DROP TABLE security_master')
             self.mutate(ddl)
             self.assert_refused_unchanged('015-04')
 
     def test_commented_check_clauses_do_not_satisfy_security_schema_contract(self):
-        check = "CHECK(market IN ('SSE','SZSE','BSE'))"
+        check = "CHECK (market IN ('SSE', 'SZSE', 'BSE'))"
         for replacement in ('/* ' + check + ' */', '-- ' + check + '\n'):
             with self.subTest(comment_style=replacement[:2]):
                 self.mutate('DROP TABLE security_master')
@@ -950,25 +977,88 @@ class PhaseCPrepTests(unittest.TestCase):
     def test_only_verbatim_whitelisted_creates_can_create_tables(self):
         safety = importlib.import_module('tools.phase_c_safety')
         contracts = importlib.import_module('tools.phase_c_contracts')
-        for step in ('015-05', '015-06'):
+        for step in SCRIPTS:
             with closing(sqlite3.connect(':memory:', factory=safety.GuardedConnection,
                                         cached_statements=0)) as db:
                 db.install_policy(step, contracts)
                 for sql in contracts.DDL_BY_STEP[step]:
                     with self.assertRaises(sqlite3.DatabaseError):
-                        db.execute(sql.replace('IF NOT EXISTS ', ''))
+                        db.execute(sql + ' ')
                     db.execute(sql)
-                expected_names = ({'holding_config', 'holding_config_meta'} if step == '015-05'
-                                  else {'dashboard_position_snapshot', 'dashboard_overview'})
+                expected_names = set(contracts.WRITE_BY_STEP[step])
                 self.assertEqual({row[0] for row in db.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'")}, expected_names)
         with closing(sqlite3.connect(':memory:', factory=safety.GuardedConnection,
                                     cached_statements=0)) as db:
             db.install_policy('015-04', contracts)
             with self.assertRaises(sqlite3.DatabaseError):
-                db.execute(SECURITY_DDL)
+                db.execute(SECURITY_DDL.rstrip('\n'))
+
+    def test_all_create_texts_match_independent_locked_hashes(self):
+        safety = importlib.import_module('tools.phase_c_safety')
+        for step, statements in DDL_BY_STEP.items():
+            self.assertEqual(tuple(hashlib.sha256(sql.encode('utf-8')).hexdigest()
+                                   for sql in statements), safety.CREATE_SHA256_BY_STEP[step])
+        self.assertEqual(len(SECURITY_DDL.encode('utf-8')), 458)
+        self.assertTrue(SECURITY_DDL.endswith(';\n'))
+
+    def test_canonical_create_on_scratch_has_exact_contract_signature(self):
+        safety = importlib.import_module('tools.phase_c_safety')
+        contracts = importlib.import_module('tools.phase_c_contracts')
+        scratch = self.root / 'canonical-only.sqlite'
+        with closing(sqlite3.connect(scratch, factory=safety.GuardedConnection,
+                                    cached_statements=0)) as db:
+            db.install_policy('015-04', contracts)
+            db.execute(SECURITY_DDL)
+            columns = db.execute('PRAGMA table_xinfo(security_master)').fetchall()
+            self.assertEqual(tuple(row[1] for row in columns), SECURITY_COLUMNS)
+            self.assertEqual([(row[2], row[3], row[4], row[5], row[6]) for row in columns], [
+                ('TEXT', 1, None, 1, 0), ('TEXT', 1, None, 2, 0),
+                ('TEXT', 1, None, 0, 0), ('TEXT', 1, None, 0, 0),
+                ('INTEGER', 1, None, 0, 0), ('TEXT', 1, "'CNY'", 0, 0),
+                ('TEXT', 0, None, 0, 0), ('TEXT', 1, None, 0, 0),
+            ])
+            contracts._schema(db, 'security_master')
+
+    def test_single_character_tampered_whitelisted_creates_are_hash_rejected(self):
+        safety = importlib.import_module('tools.phase_c_safety')
+        contracts = importlib.import_module('tools.phase_c_contracts')
+        # A whitespace substitution is still valid SQL and would pass schema
+        # normalization. Even replacing the exact allowlist must not allow it.
+        for step, statements in DDL_BY_STEP.items():
+            for index, statement in enumerate(statements):
+                with self.subTest(step=step, create_index=index):
+                    tampered = statement.replace(' ', '\t', 1)
+                    altered = statements[:index] + (tampered,) + statements[index + 1:]
+                    with patch.dict(contracts.DDL_BY_STEP, {step: altered}), \
+                            closing(sqlite3.connect(self.root / 'tamper.sqlite',
+                                                   factory=safety.GuardedConnection,
+                                                   cached_statements=0)) as db:
+                        db.install_policy(step, contracts)
+                        traced = []
+                        db.set_trace_callback(traced.append)
+                        with self.assertRaisesRegex(safety.GateError, '^CREATE_SHA256_MISMATCH$'):
+                            db.execute(tampered)
+                        self.assertEqual(traced, [])
+                        self.assertEqual(db.execute('SELECT name FROM sqlite_master').fetchall(), [])
+
+    def test_tampered_canonical_create_fails_preflight_without_scratch_changes(self):
+        contracts = importlib.import_module('tools.phase_c_contracts')
+        self.mutate('DROP TABLE security_master')
+        before = self.files()
+        with patch.dict(contracts.DDL_BY_STEP, {'015-04': (SECURITY_DDL[:-1],)}):
+            for dry in (True, False):
+                report, _ = self.invoke_direct('015-04', success=False, dry=dry)
+                self.assertEqual(report['error'], 'CREATE_SHA256_MISMATCH')
+                self.assertEqual(self.files(), before)
+
+    def test_schema_verifier_rejects_tampered_create_before_execution(self):
+        safety = importlib.import_module('tools.phase_c_safety')
+        with self.assertRaisesRegex(safety.GateError, '^CREATE_SHA256_MISMATCH$'):
+            safety.verify_schema((), (), (SECURITY_DDL[:-1],), '015-04')
 
     def test_live_transaction_failure_restores_exact_bytes_including_new_tables(self):
+        self.mutate('DROP TABLE security_master')
         safety = importlib.import_module('tools.phase_c_safety')
         contracts = importlib.import_module('tools.phase_c_contracts')
         original = contracts.execute

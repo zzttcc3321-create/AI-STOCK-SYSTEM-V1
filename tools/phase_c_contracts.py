@@ -10,7 +10,9 @@ import math
 import re
 import sqlite3
 
-from tools.phase_c_safety import integer, money, read_csv, require, valid_date
+from tools.phase_c_safety import (
+    integer, money, read_csv, require, valid_date, verify_create_sha256,
+)
 
 
 SECURITY_COLUMNS = (
@@ -26,7 +28,20 @@ AUTH_BY_STEP = {
 
 # These are the commander's CREATE statements, intentionally kept verbatim.
 DDL_BY_STEP = {
-    "015-04": (),
+    "015-04": (
+        """CREATE TABLE security_master (
+    market TEXT NOT NULL CHECK (market IN ('SSE', 'SZSE', 'BSE')),
+    symbol TEXT NOT NULL,
+    name TEXT NOT NULL,
+    security_type TEXT NOT NULL CHECK (security_type IN ('STOCK', 'ETF')),
+    lot_size INTEGER NOT NULL CHECK (lot_size > 0),
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    list_date TEXT NULL,
+    status TEXT NOT NULL CHECK (status IN ('LISTED', 'SUSPENDED', 'DELISTED')),
+    PRIMARY KEY (market, symbol)
+);
+""",
+    ),
     "015-05": (
         """CREATE TABLE IF NOT EXISTS holding_config(
     market   TEXT NOT NULL,
@@ -225,6 +240,7 @@ def _create(db, step):
     missing = sum(db.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (table,))
                   .fetchone() is None for table in WRITE_BY_STEP[step])
     for statement in DDL_BY_STEP[step]:
+        verify_create_sha256(statement, step)
         db.execute(statement)
     for table in WRITE_BY_STEP[step]:
         _schema(db, table)
@@ -264,7 +280,13 @@ def prepare(step, args):
 
 
 def _security(db, prepared):
-    _schema(db, "security_master")
+    # The canonical CREATE has no IF NOT EXISTS; preserve validated repeats.
+    created = 0
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name = ?",
+                  ("security_master",)).fetchone() is None:
+        created = _create(db, "015-04")
+    else:
+        _schema(db, "security_master")
     expected = {row[:2]: row for row in prepared["rows"]}
     current = {
         row[:2]: tuple(row) for row in db.execute(
@@ -290,7 +312,7 @@ def _security(db, prepared):
     require(db.execute("SELECT COUNT(*) FROM security_master").fetchone()[0]
             == len(prepared["rows"]), "SECURITY_POST_WRITE_COUNT_MISMATCH")
     return {
-        "status": "APPLIED" if inserts else "IDEMPOTENT_NOOP",
+        "status": "APPLIED" if inserts or created else "IDEMPOTENT_NOOP",
         "row_count": len(observed), "inserted": len(inserts),
         "skipped": len(current), "changed": len(inserts),
         "source_sha256": prepared["source_sha256"],

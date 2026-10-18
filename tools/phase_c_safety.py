@@ -32,6 +32,26 @@ GateError = _gate.GateError
 require = _gate.require
 
 
+# Independent pins over exact UTF-8 text, without stripping or normalization.
+# security_master includes the canonical source file's final LF byte.
+CREATE_SHA256_BY_STEP = {
+    '015-04': ('20ee80403e222acb544790e8df9cea8bad6143777998a89c4c5320fd1c661565',),
+    '015-05': (
+        'b1eb4797677f786c61e1b413686edc80fdcbca62e75dabc67016b11de176717b',
+        'e81abd28d2917ec1a631e005fbf66d23ace5dfc9cfa34eb7db7a7bc5cdf72de2',
+    ),
+    '015-06': (
+        'a19aacc38e712e1b105b8280d97e93cc9ce4106df59d362aa55663c17e169589',
+        'f81b9634b58a44d8359f07dbe0da93aed306ad22851707fbd8d6b09536eb4fd8',
+    ),
+}
+
+
+def verify_create_sha256(statement, step):
+    require(hashlib.sha256(statement.encode('utf-8')).hexdigest()
+            in CREATE_SHA256_BY_STEP.get(step, ()), 'CREATE_SHA256_MISMATCH')
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         # argparse and SQLite diagnostics can contain private input values.
@@ -139,6 +159,7 @@ class GuardedConnection(sqlite3.Connection):
     """Exact SQL gate for DDL plus SQLite's compiler gate for indirect writes."""
 
     def install_policy(self, step, contracts):
+        self.step = step
         self.allowed_ddl = contracts.DDL_BY_STEP[step]
         self.read_tables = set(contracts.READ_BY_STEP[step]) | set(contracts.WRITE_BY_STEP[step])
         self.write_tables = contracts.WRITE_BY_STEP[step]
@@ -147,6 +168,8 @@ class GuardedConnection(sqlite3.Connection):
 
     def execute(self, sql, parameters=()):
         approved = sql in getattr(self, 'allowed_ddl', ())
+        if approved:
+            verify_create_sha256(sql, self.step)
         self.active_ddl = approved
         try:
             return super().execute(sql, parameters)
@@ -198,10 +221,11 @@ def check_integrity(db):
     require(not db.execute('PRAGMA foreign_key_check').fetchall(), 'DATABASE_FOREIGN_KEY_FAILURE')
 
 
-def verify_schema(before, after, ddls):
+def verify_schema(before, after, ddls, step):
     # Build the canonical additions in memory. No baseline table DDL is issued.
     with closing(sqlite3.connect(':memory:')) as expected:
         for sql in ddls:
+            verify_create_sha256(sql, step)
             expected.execute(sql)
         canonical = inventory(expected)
     require(set(before).issubset(set(after)), 'SCHEMA_CHANGED')
@@ -215,7 +239,7 @@ def verify_schema(before, after, ddls):
 def execute_checked(step, db, args, prepared, contracts):
     before = inventory(db)
     result = contracts.execute(step, db, args, prepared)
-    verify_schema(before, inventory(db), contracts.DDL_BY_STEP[step])
+    verify_schema(before, inventory(db), contracts.DDL_BY_STEP[step], step)
     check_integrity(db)
     return result
 
