@@ -32,7 +32,8 @@ connection or new real schema measurement was performed. The
 [schema binding ledger](015_PHASE_C_SCHEMA_BINDING.md) records source provenance,
 field types/defaults/nullability/PK positions, CHECK constraints and all five
 CREATE hashes. The other four CREATE strings were compared with `ff2487a`
-and remain byte-for-byte unchanged.
+and remained byte-for-byte unchanged at that stage. The later authorized
+avg_cost precision revision is recorded in the schema binding ledger and below.
 
 015-04 creates a missing `security_master` with the whitelisted CREATE in the
 same transaction as the import. An existing table is schema-validated before
@@ -60,7 +61,7 @@ are never emitted or recorded in evidence.
 | Step / exact authorization | Permitted mutations | Permitted CREATE |
 | --- | --- | --- |
 | 015-04 / `SECURITY_MASTER_IMPORT=YES` | Security snapshot INSERT or skip; conflicts fail | Canonical `security_master` only, when absent |
-| 015-05 / `HOLDING_CONFIG_WRITE=YES` | Atomic holding replacement and three metadata keys | Unchanged `holding_config`, `holding_config_meta` |
+| 015-05 / `HOLDING_CONFIG_WRITE=YES` | Atomic holding replacement and three metadata keys | `holding_config` with the authorized 3-decimal CHECK, unchanged `holding_config_meta` |
 | 015-06 / `DASHBOARD_INITIAL_DATA_WRITE=YES` | Deterministic append-only dashboard batch | Unchanged `dashboard_position_snapshot`, `dashboard_overview` |
 
 Every invocation requires an exact auth flag, explicit safe absolute paths and
@@ -105,7 +106,31 @@ empty-source creation, full 04 -> 05 -> 06 CLI hash chaining, repeat no-ops,
 dry-run isolation and exact-byte rollback after CREATE/INSERT failure. Existing
 auth/path/source/schema/monetary/privacy and indirect-write regressions remain.
 Independent verification confirmed canonical-source byte equality and unchanged
-015-05/015-06 SQL strings against the starting commit.
+015-05/015-06 SQL strings against the starting commit at that stage.
+
+## Authorized avg_cost precision revision — 2026-10-18
+
+The commander revised the contract to at most **3 decimal places (3 位小数)**.
+The CSV gate, holding SQL CHECK and exact storage/dashboard arithmetic now
+preserve that precision without rounding. The revised `holding_config` CREATE
+hash is independently pinned in the safety boundary and schema binding ledger.
+Regression checks cover `4.241` acceptance, `4.2415` rejection, SQL enforcement,
+dry-run isolation, full-chain cost fidelity and repeat no-ops on synthetic data.
+The 015-05 real DB write remains **PAUSED until this fix is merged**.
+
+Revision branch: `fix/015-money-3decimals`, based on `origin/main` at `56780b0`.
+Validation used only synthetic fixtures; no real DB write was performed.
+
+```console
+$ PYTHONDONTWRITEBYTECODE=1 TMPDIR=/tmp python3 -m unittest discover -s tests -p test_015_phase_c_prep.py -q
+Ran 81 tests in 21.851s
+OK
+$ PYTHONDONTWRITEBYTECODE=1 REQUIRE_STREAMLIT=1 TMPDIR=/tmp python3 -m unittest discover -s tests -v
+Ran 1157 tests in 571.385s
+OK
+```
+
+Full revision suite: **1,157 PASS, 0 FAIL, 0 ERROR, 0 SKIP**.
 
 PR #49 remains draft. `REVIEW_B=REQUEST_CHANGES_UNRESOLVED` records that no new
 review approval is claimed. `REAL_DB_WRITE=NOT_STARTED` and

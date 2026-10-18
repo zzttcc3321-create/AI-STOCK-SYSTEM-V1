@@ -37,7 +37,7 @@ require = _gate.require
 CREATE_SHA256_BY_STEP = {
     '015-04': ('20ee80403e222acb544790e8df9cea8bad6143777998a89c4c5320fd1c661565',),
     '015-05': (
-        'b1eb4797677f786c61e1b413686edc80fdcbca62e75dabc67016b11de176717b',
+        'd764d2839f0177a4bd26880a41d603a0dd067e2a0f5e099fa2fd8fb187ed54d0',
         'e81abd28d2917ec1a631e005fbf66d23ace5dfc9cfa34eb7db7a7bc5cdf72de2',
     ),
     '015-06': (
@@ -114,7 +114,8 @@ def integer(value, minimum=0):
 
 
 def money(value):
-    require(isinstance(value, str) and re.fullmatch(r'[0-9]+(?:\.[0-9]{1,2})?', value)
+    """Validate a nonnegative avg_cost with at most 3 decimal places (3 位小数)."""
+    require(isinstance(value, str) and re.fullmatch(r'[0-9]+(?:\.[0-9]{1,3})?', value)
             is not None, 'MONEY_INVALID')
     result = Decimal(value)
     require(result.is_finite() and result >= 0, 'MONEY_INVALID')

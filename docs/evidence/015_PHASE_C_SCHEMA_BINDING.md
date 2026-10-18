@@ -76,17 +76,18 @@ No normalization, whitespace trimming or line-ending conversion is allowed.
 | Table | Step | UTF-8 bytes | CREATE text SHA256 |
 | --- | --- | --- | --- |
 | `security_master` | 015-04 | 458 | `20ee80403e222acb544790e8df9cea8bad6143777998a89c4c5320fd1c661565` |
-| `holding_config` | 015-05 | 270 | `b1eb4797677f786c61e1b413686edc80fdcbca62e75dabc67016b11de176717b` |
+| `holding_config` | 015-05 | 270 | `d764d2839f0177a4bd26880a41d603a0dd067e2a0f5e099fa2fd8fb187ed54d0` |
 | `holding_config_meta` | 015-05 | 104 | `e81abd28d2917ec1a631e005fbf66d23ace5dfc9cfa34eb7db7a7bc5cdf72de2` |
 | `dashboard_position_snapshot` | 015-06 | 345 | `a19aacc38e712e1b105b8280d97e93cc9ce4106df59d362aa55663c17e169589` |
 | `dashboard_overview` | 015-06 | 250 | `f81b9634b58a44d8359f07dbe0da93aed306ad22851707fbd8d6b09536eb4fd8` |
 
-The `security_master` hash is also the canonical source file SHA256. The other
-four CREATE strings remain byte-for-byte identical to `ff2487a` and the original
-commander contract; their hashes above are unchanged. Those four strings end
-at their semicolon without a trailing newline, preserving their original format.
+The `security_master` hash is also the canonical source file SHA256. Per the
+commander's 2026-10-18 contract revision, `holding_config` now checks
+`avg_cost = ROUND(avg_cost, 3)`; its revised hash is pinned above. The other
+three CREATE strings remain byte-for-byte identical to `ff2487a`. All four
+015-05/015-06 strings end at their semicolon without a trailing newline.
 
-The four unchanged addition contracts retain these fields in order:
+The four addition contracts retain these fields in order:
 
 | Table | Contract fields |
 | --- | --- |
@@ -94,6 +95,17 @@ The four unchanged addition contracts retain these fields in order:
 | `holding_config_meta` | `key`, `value` |
 | `dashboard_position_snapshot` | `batch_id`, `market`, `symbol`, `name`, `quantity`, `avg_cost`, `cost_value`, `as_of_date` |
 | `dashboard_overview` | `batch_id`, `as_of_date`, `total_positions`, `total_cost_value`, `currency` |
+
+## 015-05 avg_cost precision revision
+
+The commander revised `avg_cost` to **at most 3 decimal places (最多 3 位小数)**.
+CSV validation and the SQL CHECK both accept `4.241` and reject `4.2415`;
+values are never rounded to fit. Exact arithmetic uses integer thousandths of
+yuan, including 015-06 position costs and totals, and rejects SQLite REAL
+round-trip precision loss. For synthetic quantity 42,000, retaining the third
+decimal preserves 42 yuan compared with truncating the example cost to `4.24`.
+Existing incompatible schemas still fail validation; this revision performs
+no migration. The 015-05 real DB write remains **PAUSED until this fix is merged**.
 
 ## Validation boundary
 
