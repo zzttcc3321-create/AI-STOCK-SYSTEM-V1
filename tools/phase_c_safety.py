@@ -70,7 +70,8 @@ def safe_path(value, *, directory=False, must_exist=True):
     require(isinstance(value, (str, Path)), 'ABSOLUTE_PATH_REQUIRED')
     raw = str(value)
     path = Path(raw)
-    require(path.is_absolute() and not raw.startswith('//') and '\\' not in raw
+    # Backslashes are local separators on Windows; reject only UNC prefixes.
+    require(path.is_absolute() and not raw.replace('\\', '/').startswith('//')
             and '..' not in path.parts, 'ABSOLUTE_LOCAL_PATH_REQUIRED')
     for parent in reversed(path.parents):
         require_safe_directory(parent, must_exist=must_exist)
