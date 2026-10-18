@@ -5,6 +5,7 @@ No selector, network connection, or fixture refers to the Windows fact database.
 """
 from contextlib import closing, redirect_stderr, redirect_stdout
 import csv
+from decimal import Decimal
 import hashlib
 import importlib
 import io
@@ -43,7 +44,7 @@ HOLDING_DDL = """CREATE TABLE IF NOT EXISTS holding_config(
     market   TEXT NOT NULL,
     symbol   TEXT NOT NULL,
     quantity INTEGER NOT NULL CHECK(quantity >= 0),
-    avg_cost REAL NOT NULL CHECK(avg_cost >= 0 AND avg_cost = ROUND(avg_cost, 2)),
+    avg_cost REAL NOT NULL CHECK(avg_cost >= 0 AND avg_cost = ROUND(avg_cost, 3)),
     PRIMARY KEY(market, symbol)
   );
   CREATE TABLE IF NOT EXISTS holding_config_meta(
@@ -712,6 +713,63 @@ class PhaseCPrepTests(unittest.TestCase):
         self.assertEqual(dict(self.query('SELECT key,value FROM holding_config_meta')),
                          {'as_of_date': self.as_of, 'version': '1.0', 'source_sha256': sha(self.holdings)})
 
+    def test_money_accepts_up_to_three_decimal_places_without_rounding(self):
+        from tools.phase_c_safety import money
+        for value in ('0', '4', '4.2', '4.24', '4.241', '0.001', '4.240'):
+            with self.subTest(value=value):
+                self.assertEqual(money(value), Decimal(value))
+
+    def test_money_rejects_four_decimal_places_and_invalid_formats(self):
+        from tools.phase_c_safety import GateError, money
+        for value in ('4.2415', '4.2410', '-4.241', '4.241e0', ' 4.241',
+                      '4.241 ', '.241', '4.', 'NaN', 'Infinity', 4.241, None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(GateError, '^MONEY_INVALID$'):
+                    money(value)
+
+    def test_three_decimal_holding_survives_full_chain_and_preserves_cost(self):
+        rows = [['SSE', '999999', '42000', '4.241'],
+                ['SZSE', '000099', '3', '0.001']]
+        self.write_csv(self.holdings, HOLDING_COLUMNS, rows)
+        self.invoke('015-04')
+        before = self.files()
+        self.invoke('015-05', dry=True)
+        self.assertEqual(self.files(), before)
+        _, output = self.invoke('015-05')
+        self.assertEqual(self.query('SELECT avg_cost FROM holding_config ORDER BY market'),
+                         [(4.241,), (0.001,)])
+        self.invoke('015-06', expected_hash=self.handoff_hash(output))
+        self.assertEqual(self.query('SELECT avg_cost,cost_value FROM dashboard_position_snapshot '
+                                    'ORDER BY market'), [(4.241, 178122.0), (0.001, 0.003)])
+        self.assertEqual(self.query('SELECT total_cost_value FROM dashboard_overview'),
+                         [(178122.003,)])
+        self.assertEqual(Decimal('178122') - Decimal('4.24') * 42000, Decimal('42'))
+        before = self.files()
+        for step in ('015-05', '015-06'):
+            _, output = self.invoke(step)
+            self.assertIn('IDEMPOTENT_NOOP', output)
+        self.assertEqual(self.files(), before)
+
+    def test_four_decimal_cost_is_refused_without_changing_existing_holdings(self):
+        self.seed_holdings()
+        self.write_csv(self.holdings, HOLDING_COLUMNS, [['SSE', '999999', '1', '4.2415']])
+        before = self.files()
+        for dry in (True, False):
+            report, _ = self.invoke('015-05', success=False, dry=dry)
+            self.assertEqual(report['error'], 'MONEY_INVALID')
+            self.assertEqual(self.files(), before)
+        self.assertEqual(self.query('SELECT avg_cost FROM holding_config ORDER BY market'),
+                         [(123.47,), (0.0,)])
+        self.assertFalse(self.backups.exists())
+
+    def test_holding_sql_constraint_enforces_three_decimal_limit(self):
+        with closing(sqlite3.connect(':memory:')) as db:
+            db.execute(DDL_BY_STEP['015-05'][0])
+            db.execute('INSERT INTO holding_config VALUES (?,?,?,?)', ('SSE', '999999', 1, 4.241))
+            self.assertEqual(db.execute('SELECT avg_cost FROM holding_config').fetchall(), [(4.241,)])
+            with self.assertRaises(sqlite3.IntegrityError):
+                db.execute('INSERT INTO holding_config VALUES (?,?,?,?)', ('SZSE', '000099', 1, 4.2415))
+
     def test_holding_missing_delisted_or_wrong_market_symbol_fails(self):
         self.seed_holdings()
         for market, symbol in (('SSE', '999998'), ('BSE', '999999'), ('', '999999'), ('SSE', '')):
@@ -726,7 +784,7 @@ class PhaseCPrepTests(unittest.TestCase):
         self.write_csv(self.holdings, HOLDING_COLUMNS, [*HOLDING_ROWS, HOLDING_ROWS[0]])
         self.assert_refused_unchanged('015-05')
         invalid = ((2, '-1'), (2, '1.5'), (2, 'abc'), (2, ''), (2, '1e2'),
-                   (2, '9223372036854775808'), (3, '-0.01'), (3, '1.001'),
+                   (2, '9223372036854775808'), (3, '-0.01'), (3, '4.2415'),
                    (3, 'nan'), (3, 'inf'), (3, ''), (3, 'abc'), (3, '9' * 400))
         for index, value in invalid:
             with self.subTest(field=HOLDING_COLUMNS[index]):

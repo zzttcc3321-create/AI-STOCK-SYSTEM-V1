@@ -26,7 +26,7 @@ AUTH_BY_STEP = {
     "015-06": "DASHBOARD_INITIAL_DATA_WRITE=YES",
 }
 
-# These are the commander's CREATE statements, intentionally kept verbatim.
+# Commander's CREATE statements, including the authorized 3-decimal avg_cost revision.
 DDL_BY_STEP = {
     "015-04": (
         """CREATE TABLE security_master (
@@ -47,7 +47,7 @@ DDL_BY_STEP = {
     market   TEXT NOT NULL,
     symbol   TEXT NOT NULL,
     quantity INTEGER NOT NULL CHECK(quantity >= 0),
-    avg_cost REAL NOT NULL CHECK(avg_cost >= 0 AND avg_cost = ROUND(avg_cost, 2)),
+    avg_cost REAL NOT NULL CHECK(avg_cost >= 0 AND avg_cost = ROUND(avg_cost, 3)),
     PRIMARY KEY(market, symbol)
   );""",
         """CREATE TABLE IF NOT EXISTS holding_config_meta(
@@ -126,25 +126,25 @@ def _unique(rows):
     require(len({row[:2] for row in rows}) == len(rows), "DUPLICATE_SOURCE_KEY")
 
 
-def _cents(value):
-    """Convert a finite decimal monetary amount to integer cents exactly."""
+def _mills(value):
+    """Convert a finite decimal monetary amount to integer thousandths of yuan exactly."""
     try:
         decimal = value if isinstance(value, Decimal) else Decimal(str(value))
         require(decimal.is_finite() and decimal >= 0, "INVALID_MONEY")
         # Decimal's default precision must not round a large product or amount.
         numerator, denominator = decimal.as_integer_ratio()
-        numerator *= 100
+        numerator *= 1000
         require(numerator % denominator == 0, "INVALID_MONEY_PRECISION")
         return numerator // denominator
     except (InvalidOperation, ValueError, OverflowError):
         require(False, "INVALID_MONEY")
 
 
-def _real(cents):
-    """SQLite REAL must preserve the intended decimal cents on round-trip."""
+def _real(mills):
+    """SQLite REAL must preserve the intended thousandths of yuan on round-trip."""
     try:
-        result = float(f"{cents // 100}.{cents % 100:02d}")
-        require(math.isfinite(result) and _cents(result) == cents,
+        result = float(f"{mills // 1000}.{mills % 1000:03d}")
+        require(math.isfinite(result) and _mills(result) == mills,
                 "SQLITE_REAL_PRECISION_LOSS")
         return result
     except (ValueError, OverflowError):
@@ -271,7 +271,7 @@ def prepare(step, args):
             ))
         else:
             rows.append((market, symbol, integer(record["quantity"]),
-                         _real(_cents(money(record["avg_cost"])))))
+                         _real(_mills(money(record["avg_cost"])))))
     _unique(rows)
     prepared = {"rows": sorted(rows), "source_sha256": source_sha256}
     if step == "015-05":
@@ -397,19 +397,19 @@ def _verify_batch(db, batch_id):
     ).fetchall()]
     require(overview[1] == len(rows) and overview[3] == "CNY",
             "DASHBOARD_POST_WRITE_COUNT_MISMATCH")
-    total_cents = 0
+    total_mills = 0
     for row in rows:
         require(type(row[3]) is int and row[3] >= 0, "INVALID_STORED_QUANTITY")
-        cost_cents = row[3] * _cents(row[4])
-        require(_cents(row[5]) == cost_cents and row[6] == overview[0],
+        cost_mills = row[3] * _mills(row[4])
+        require(_mills(row[5]) == cost_mills and row[6] == overview[0],
                 "DASHBOARD_POST_WRITE_ROW_MISMATCH")
-        total_cents += cost_cents
-    require(_cents(overview[2]) == total_cents, "DASHBOARD_POST_WRITE_TOTAL_MISMATCH")
+        total_mills += cost_mills
+    require(_mills(overview[2]) == total_mills, "DASHBOARD_POST_WRITE_TOTAL_MISMATCH")
     sql_total = db.execute(
-        "SELECT ROUND(COALESCE(SUM(cost_value), 0), 2) "
+        "SELECT ROUND(COALESCE(SUM(cost_value), 0), 3) "
         "FROM dashboard_position_snapshot WHERE batch_id = ?", (batch_id,),
     ).fetchone()[0]
-    require(_cents(sql_total) == total_cents, "DASHBOARD_SQL_SUM_PRECISION_LOSS")
+    require(_mills(sql_total) == total_mills, "DASHBOARD_SQL_SUM_PRECISION_LOSS")
     return overview, rows
 
 
@@ -438,18 +438,18 @@ def _dashboard(db):
             "as_of_date": as_of_date, "source_sha256": meta["source_sha256"],
         }
     projected = []
-    total_cents = 0
+    total_mills = 0
     for market, symbol, name, quantity, avg_cost in joined:
         _text(market)
         _text(symbol)
         _text(name)
         require(type(quantity) is int and quantity >= 0, "INVALID_STORED_QUANTITY")
-        avg_cents = _cents(avg_cost)
-        cost_cents = quantity * avg_cents
-        projected.append((market, symbol, name, quantity, _real(avg_cents),
-                          _real(cost_cents), as_of_date))
-        total_cents += cost_cents
-    total_cost = _real(total_cents)
+        avg_mills = _mills(avg_cost)
+        cost_mills = quantity * avg_mills
+        projected.append((market, symbol, name, quantity, _real(avg_mills),
+                          _real(cost_mills), as_of_date))
+        total_mills += cost_mills
+    total_cost = _real(total_mills)
     require(db.execute(
         "SELECT COUNT(*) FROM dashboard_position_snapshot WHERE batch_id = ?",
         (batch_id,),
@@ -469,7 +469,7 @@ def _dashboard(db):
     overview, observed = _verify_batch(db, batch_id)
     require(observed == projected and overview[1] == holding_count,
             "DASHBOARD_POST_WRITE_PROJECTION_MISMATCH")
-    require(overview[0] == as_of_date and _cents(overview[2]) == total_cents,
+    require(overview[0] == as_of_date and _mills(overview[2]) == total_mills,
             "DASHBOARD_POST_WRITE_OVERVIEW_MISMATCH")
     return {
         "status": "APPLIED", "row_count": holding_count, "changed": holding_count + 1,
