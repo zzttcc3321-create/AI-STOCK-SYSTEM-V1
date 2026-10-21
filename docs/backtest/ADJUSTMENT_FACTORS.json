@@ -1,0 +1,3672 @@
+{
+  "version": "stage1-cash-dividend-v1",
+  "candles_sha256": "30d6cb3d7f16950d183f81fe3977caf66059fb90187e8028ddf3be4a4629c864",
+  "method": "cumulative prior_close/(prior_close-announced_cash_dividend), as of ex-date",
+  "rows": [
+    {
+      "trade_date": "2023-10-09",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-10",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-11",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-12",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-13",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-16",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-17",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-18",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-19",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-20",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-23",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-24",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-25",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-26",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-27",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-30",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-10-31",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-01",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-02",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-03",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-06",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-07",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-08",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-09",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-10",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-13",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-14",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-15",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-16",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-17",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-20",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-21",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-22",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-23",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-24",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-27",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-28",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-29",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-11-30",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-01",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-04",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-05",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-06",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-07",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-08",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-11",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-12",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-13",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-14",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-15",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-18",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-19",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-20",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-21",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-22",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-25",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-26",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-27",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-28",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2023-12-29",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-02",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-03",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-04",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-05",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-08",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-09",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-10",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-11",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-12",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-15",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-16",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-17",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-18",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-19",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-22",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-23",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-24",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-25",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-26",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-29",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-30",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-01-31",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-01",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-02",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-05",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-06",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-07",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-08",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-19",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-20",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-21",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-22",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-23",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-26",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-27",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-28",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-02-29",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-01",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-04",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-05",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-06",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-07",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-08",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-11",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-12",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-13",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-14",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-15",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-18",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-19",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-20",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-21",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-22",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-25",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-26",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-27",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-28",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-03-29",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-01",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-02",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-03",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-08",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-09",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-10",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-11",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-12",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-15",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-16",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-17",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-18",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-19",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-22",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-23",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-24",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-25",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-26",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-29",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-04-30",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-06",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-07",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-08",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-09",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-10",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-13",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-14",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-15",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-16",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-17",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-20",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-21",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-22",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-23",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-24",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-27",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-28",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-29",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-30",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-05-31",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-03",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-04",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-05",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-06",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-07",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-11",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-12",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-13",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-14",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-17",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-18",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-19",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-20",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-21",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-24",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-25",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-26",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-27",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-06-28",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-01",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-02",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-03",
+      "factor": "1.000000000000",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-04",
+      "factor": "1.037190082645",
+      "cash_dividend": "0.09"
+    },
+    {
+      "trade_date": "2024-07-05",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-08",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-15",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-16",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-17",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-22",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-29",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-30",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-07-31",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-01",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-02",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-05",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-07",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-08",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-14",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-15",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-16",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-21",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-22",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-28",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-29",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-08-30",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-02",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-03",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-04",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-05",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-09-30",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-08",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-14",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-15",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-16",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-17",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-21",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-22",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-28",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-29",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-30",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-10-31",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-01",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-04",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-05",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-07",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-08",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-14",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-15",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-21",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-22",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-28",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-11-29",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-02",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-03",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-04",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-05",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-16",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-17",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-30",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2024-12-31",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-02",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-03",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-07",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-08",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-14",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-15",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-16",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-17",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-21",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-22",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-01-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-05",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-07",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-14",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-17",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-21",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-02-28",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-03",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-04",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-05",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-07",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-14",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-17",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-21",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-28",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-03-31",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-01",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-02",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-03",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-07",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-08",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-14",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-15",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-16",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-17",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-21",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-22",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-28",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-29",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-04-30",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-07",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-08",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-14",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-15",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-16",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-21",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-22",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-28",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-29",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-05-30",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-03",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-04",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-05",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-06",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-09",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-10",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-11",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-12",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-13",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-16",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-17",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-18",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-19",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-20",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-23",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-24",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-25",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-26",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-27",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-06-30",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-01",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-02",
+      "factor": "1.037190082645",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0.086"
+    },
+    {
+      "trade_date": "2025-07-04",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-07",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-08",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-14",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-16",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-17",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-18",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-21",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-23",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-28",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-30",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-07-31",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-01",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-04",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-05",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-06",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-07",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-08",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-13",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-14",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-18",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-19",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-20",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-21",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-27",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-28",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-08-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-01",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-02",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-04",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-05",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-08",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-16",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-17",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-18",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-19",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-23",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-09-30",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-13",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-14",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-16",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-17",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-20",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-21",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-23",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-27",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-28",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-30",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-10-31",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-04",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-05",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-06",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-07",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-13",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-14",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-17",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-18",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-19",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-20",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-21",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-27",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-11-28",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-01",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-02",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-04",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-05",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-08",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-16",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-17",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-18",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-19",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-23",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-30",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2025-12-31",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-05",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-06",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-07",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-08",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-13",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-14",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-16",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-19",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-20",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-21",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-23",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-27",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-28",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-01-30",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-02",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-04",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-05",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-06",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-13",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-02-27",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-02",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-04",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-05",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-06",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-13",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-16",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-17",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-18",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-19",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-20",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-23",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-27",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-30",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-03-31",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-01",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-02",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-07",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-08",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-13",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-14",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-16",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-17",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-20",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-21",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-23",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-27",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-28",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-04-30",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-06",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-07",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-08",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-13",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-14",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-18",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-19",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-20",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-21",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-27",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-28",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-05-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-01",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-02",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-04",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-05",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-08",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-09",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-10",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-11",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-12",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-15",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-16",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-17",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-18",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-22",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-23",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-24",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-25",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-26",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-29",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-06-30",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-01",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-02",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-03",
+      "factor": "1.070423445948",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-06",
+      "factor": "1.121583390056",
+      "cash_dividend": "0.13"
+    },
+    {
+      "trade_date": "2026-07-07",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-08",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-09",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-10",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-13",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-14",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-15",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-16",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-17",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-20",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-21",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-22",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-23",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-24",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-27",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-28",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-29",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-30",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-07-31",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-03",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-04",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-05",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-06",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-07",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-10",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-11",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-12",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-13",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-14",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-17",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-18",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-19",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-20",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-21",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-24",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-25",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-26",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-27",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-28",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-08-31",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-01",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-02",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-03",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-04",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-07",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-08",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-09",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-10",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-11",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-14",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-15",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-16",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-17",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-18",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-21",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-22",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-23",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-24",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-28",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-29",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-09-30",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-10-08",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-10-09",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-10-12",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-10-13",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-10-14",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-10-15",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    },
+    {
+      "trade_date": "2026-10-16",
+      "factor": "1.121583390056",
+      "cash_dividend": "0"
+    }
+  ]
+}

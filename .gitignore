@@ -23,6 +23,8 @@ config/production.*
 
 # Raw data exports
 *.csv
+backtest/local_data/
+*_raw.json
 
 # Logs
 *.log
