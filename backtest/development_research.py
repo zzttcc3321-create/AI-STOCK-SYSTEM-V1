@@ -174,6 +174,7 @@ class Result:
     stamp: Decimal = Decimal(0)
     last_close: Decimal = Decimal(0)
     first_trigger_price_days: int = 0
+    funnel: dict[str, int] = field(default_factory=dict)
 
     @property
     def sold(self) -> int:
@@ -216,7 +217,8 @@ def _record_fill(result: Result, day: date, batch: int, trade: Fill) -> None:
 
 
 def run(candles: tuple[Candle, ...], threshold: Decimal, slippage: Decimal,
-        rules: dict | None = None) -> Result:
+        rules: dict | None = None, *,
+        diagnostic_states: tuple[StatePoint, ...] | None = None) -> Result:
     if UNITS % 4 or BATCH * 4 != UNITS or BATCH % 100:
         raise ValueError("research unit scale violates Q11 lot constraint")
     if threshold not in THRESHOLDS or slippage not in SLIPPAGES:
@@ -234,8 +236,20 @@ def run(candles: tuple[Candle, ...], threshold: Decimal, slippage: Decimal,
     if rules["orders"]["sell_triggers"][2:] != [None, None]:
         raise ValueError("research batches three/four must be disabled")
     states, anomalies = state_points(candles)
+    if diagnostic_states is not None:
+        if (len(diagnostic_states) != len(candles)
+                or any(point.day != row.trade_date for point, row in zip(diagnostic_states, candles))):
+            raise ValueError("diagnostic state dates must match development candles")
+        if any(any(point.active.get(key) != original.active.get(key) for key in ("A", "B", "C"))
+               or (point.state != ("WARMUP" if original.state == "WARMUP"
+                                   else displayed_state(point.active)))
+               for point, original in zip(diagnostic_states, states)):
+            raise ValueError("diagnostic override may only change D")
+        states = diagnostic_states
     portfolio = Portfolio(Decimal(0), UNITS)
     result = Result(threshold, slippage, states=states, anomalies=anomalies)
+    result.funnel = dict.fromkeys(("candidate_conditions", "state_allowed",
+                                   "orders", "fills", "net_profitable_completed"), 0)
     pending: dict | None = None
     filled_batches = set()
     benchmark_dividends = Decimal(0)
@@ -299,8 +313,13 @@ def run(candles: tuple[Candle, ...], threshold: Decimal, slippage: Decimal,
         result.equity.append(EquityPoint(day, equity, benchmark, equity / peak - 1))
         if point.state == "WARMUP" or day == END:
             continue
+        if point.active.get("A") and row.close >= Decimal("2.95"):
+            result.funnel["candidate_conditions"] += 1
+            if not any(point.active.get(s) for s in ("B", "C", "D")):
+                result.funnel["state_allowed"] += 1
         batch = sell_candidate(rules, row.close, point.active, filled_batches)
         if batch is not None:
+            result.funnel["orders"] += 1
             pending = {"side": "sell", "batch": batch, "shares": BATCH,
                        "band": rules["orders"]["sell_bands_raw_rmb_inclusive"][batch-1], "state": point}
             continue
@@ -325,6 +344,10 @@ def run(candles: tuple[Candle, ...], threshold: Decimal, slippage: Decimal,
     assert result.sold == result.rebought + sum(leg.remaining for leg in result.legs)
     assert portfolio.unreplenished_shares == sum(leg.remaining for leg in result.legs)
     assert portfolio.shares >= 0 and portfolio.cash >= 0
+    result.funnel["fills"] = sum(trade["side"] == "sell" for trade in result.trades)
+    result.funnel["net_profitable_completed"] = sum(
+        leg.remaining == 0 and leg.realized > 0 for leg in result.legs)
+    assert all(a >= b for a, b in zip(result.funnel.values(), list(result.funnel.values())[1:]))
     return result
 
 
