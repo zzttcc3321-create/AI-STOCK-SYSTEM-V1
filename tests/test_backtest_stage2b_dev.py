@@ -5,8 +5,10 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from backtest.calendar import trading_dates
 from backtest.config import STAGE1
@@ -14,8 +16,9 @@ from backtest.data import Candle
 from backtest.development_data import DEV_DIVIDENDS, load_development
 from backtest.development_report import render_report
 from backtest.development_research import (END, SLIPPAGES, THRESHOLDS, choose,
-                                           run, state_points)
+                                           main as research_main, run, state_points)
 from backtest.stage2a_policy import cancel_pending_sells_on_pause
+from backtest.stage2b_r1_diagnostics import RecoveryProxy, d1_states, render_diagnostics
 
 
 def history(end: date = END, prices=None, opens=None, volumes=None):
@@ -36,6 +39,96 @@ def history(end: date = END, prices=None, opens=None, volumes=None):
 
 
 class DevelopmentResearchTests(unittest.TestCase):
+    def test_r1_isolated_file_and_malformed_future_price_boundary(self):
+        rows = history()
+        raw_rows = [[r.ts_code, r.trade_date.strftime("%Y%m%d"),
+                     *[str(getattr(r, field)) for field in
+                       ("open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount")]]
+                    for r in rows]
+        with tempfile.TemporaryDirectory() as folder:
+            isolated = Path(folder) / "jlgs_dev_only.json"
+            isolated.write_text(json.dumps({"candles": raw_rows}), encoding="utf-8")
+            selected = load_development(isolated)
+            self.assertEqual(len(selected), 485)
+            self.assertEqual((selected[0].trade_date, selected[-1].trade_date),
+                             (STAGE1.development_start, END))
+            self.assertTrue(all(row.trade_date <= END for row in selected))
+            damaged = Path(folder) / "damaged_future.json"
+            damaged.write_text('{"candles":' + json.dumps(raw_rows)[:-1]
+                               + ',["601518.SH","20251001",FORBIDDEN_FUTURE_PRICE',
+                               encoding="utf-8")
+            self.assertEqual(load_development(damaged), selected)
+            reports = []
+            for source in (isolated, damaged):
+                output = Path(folder) / (source.stem + ".md")
+                with patch("sys.argv", ["development_research", "--source", str(source),
+                                        "--report", str(output)]):
+                    research_main()
+                reports.append(output.read_bytes())
+            self.assertEqual(reports[0], reports[1])
+            self.assertNotIn(b"FORBIDDEN_FUTURE_PRICE", reports[1])
+
+    def test_r1_proxy_release_next_day_restop_and_audit(self):
+        n1, n2 = RecoveryProxy(1), RecoveryProxy(2)
+        for proxy in (n1, n2):
+            proxy.on_completed_week(date(2024, 2, 2), Decimal("2.39"))
+            proxy.on_completed_week(date(2024, 2, 9), Decimal("2.29"))
+            self.assertTrue(proxy.review_risk)
+            self.assertTrue(proxy.weekly_price_stop)
+            proxy.on_completed_week(date(2024, 2, 16), Decimal("2.40"))
+            self.assertTrue(proxy.blocked)  # Confirmation close cannot release that day.
+        self.assertTrue(n1.release_next_day)
+        self.assertFalse(n2.release_next_day)
+        n1.start_day(date(2024, 2, 19))
+        n2.start_day(date(2024, 2, 19))
+        self.assertFalse(n1.blocked)
+        self.assertTrue(n2.blocked)
+        n2.on_completed_week(date(2024, 2, 23), Decimal("2.40"))
+        self.assertTrue(n2.blocked)
+        n2.start_day(date(2024, 2, 26))
+        self.assertFalse(n2.blocked)
+        for proxy in (n1, n2):
+            proxy.on_completed_week(date(2024, 3, 1), Decimal("2.39"))
+            self.assertTrue(proxy.weekly_price_stop)
+            self.assertTrue(proxy.blocked)
+            self.assertTrue(any("invalidation review required" in event for _, event in proxy.audit))
+            self.assertTrue(any("downward cross" in event for _, event in proxy.audit))
+
+    def test_r1_funnel_reconciles_with_orders_fills_and_positive_rounds(self):
+        rows = history(prices={61: "2.80", 62: "2.80"}, opens={61: "2.95", 62: "2.80"})
+        result = run(rows, Decimal("0.010"), Decimal("0.01"))
+        counts = list(result.funnel.values())
+        self.assertTrue(all(a >= b for a, b in zip(counts, counts[1:])))
+        self.assertEqual(result.funnel["orders"],
+                         sum(t["side"] == "sell" for t in result.trades)
+                         + sum(t["side"] == "sell" for t in result.cancellations))
+        self.assertEqual(result.funnel["fills"], sum(t["side"] == "sell" for t in result.trades))
+        self.assertEqual(result.funnel["net_profitable_completed"],
+                         sum(leg.remaining == 0 and leg.realized > 0 for leg in result.legs))
+        self.assertGreater(result.funnel["net_profitable_completed"], 0)
+        diagnostic_states, trace, audit = d1_states(rows, 2)
+        self.assertEqual(len(trace), len(rows))
+        self.assertTrue(all(point.day <= END for point in diagnostic_states))
+        rerun = run(rows, Decimal("0.010"), Decimal("0.01"), diagnostic_states=diagnostic_states)
+        self.assertTrue(all(a >= b for a, b in zip(rerun.funnel.values(),
+                                                   list(rerun.funnel.values())[1:])))
+        altered = list(diagnostic_states)
+        altered[60] = replace(altered[60], active={**altered[60].active,
+                                                  "A": not altered[60].active["A"]})
+        with self.assertRaisesRegex(ValueError, "only change D"):
+            run(rows, Decimal("0.010"), Decimal("0.01"),
+                diagnostic_states=tuple(altered))
+
+    def test_r1_output_artifacts_have_development_date_ceiling(self):
+        rows = history(prices={i: "2.50" for i in range(485)})
+        results = [run(rows, t, s) for t in THRESHOLDS for s in SLIPPAGES]
+        artifacts = (render_report(results, None), render_diagnostics(rows))
+        for artifact in artifacts:
+            dates = [date.fromisoformat(value) for value in
+                     re.findall(r"\b20\d\d-\d\d-\d\d\b", artifact)]
+            self.assertTrue(dates)
+            self.assertTrue(all(day <= END for day in dates))
+
     def test_loader_stops_before_future_ohlcv_and_rejects_gap(self):
         rows = history()
         raw_rows = [[r.ts_code, r.trade_date.strftime("%Y%m%d"),
