@@ -1,0 +1,29 @@
+{
+  "version": "jlgs-v1.1-b-development-research-preregistered",
+  "approval": "qi_six_A_commander_PASS_WITH_CHANGE",
+  "research_only": true,
+  "ready_for_stage2b": false,
+  "source": "backtest/local_data/jlgs_dev_only.json",
+  "source_sha256": "10ba156037d0ce2cec0c1b8489c78e38185e2e7de37d34a168e1693d508ac5b1",
+  "sessions": 485,
+  "first_date": "2023-10-09",
+  "last_date": "2025-09-30",
+  "units": 10000,
+  "batch_units": 2500,
+  "max_unrebought_fraction": "0.50",
+  "box": ["2.64", "3.00"],
+  "sell_triggers": ["2.95", "3.00", null, null],
+  "sell_open_band": ["2.64", "3.00"],
+  "regular_buy_bands": [["2.76", "2.82"], ["2.62", "2.68"]],
+  "main": {"daily_breakout": "3.00", "risk_wait_sessions": 5, "regular_net_per_share": "0.010", "d_state": "D0"},
+  "single_factor": {
+    "breakout_295": {"daily_breakout": "2.95"},
+    "wait_10": {"risk_wait_sessions": 10},
+    "net_000": {"regular_net_per_share": "0.000"},
+    "net_020": {"regular_net_per_share": "0.020"}
+  },
+  "slippages": ["0", "0.01", "0.02"],
+  "d1_research_only": ["D1-N1", "D1-N2"],
+  "risk_execution_permission": "offline_simulation_only_formal_use_manual_qi",
+  "formal_minimum_net_threshold": null
+}
