@@ -1,6 +1,6 @@
 {
-  "version": "jlgs-stage2a-rules-v1.0-draft",
-  "freeze_status": "PENDING_COMMANDER_AND_QI",
+  "version": "jlgs-stage2a-rules-v1.0-final-review",
+  "freeze_status": "PENDING_COMMANDER_FINAL_REVIEW",
   "ready_for_stage2b": false,
   "symbol": "601518.SH",
   "source": {
@@ -25,6 +25,10 @@
   "execution": {
     "signal_evaluation": "after_completed_daily_close_and_confirmed_weekly_close_only",
     "earliest_fill": "next_trading_session_after_signal",
+    "fill_model": "daily_OHLC_signal_close_next_session_open_no_intraday_path_assumption_pending_commander_review",
+    "fill_model_commander_confirmation": null,
+    "fill_model_commander_confirmation_null_reason": "pending_commander_final_review",
+    "order_lifetime": "signal_close_to_next_session_open_only_recheck_all_gates_before_fill",
     "weekly_confirmation": "after_15_00_Asia_Shanghai_on_final_SSE_session_of_week",
     "commission_one_side_rate": "0.00025",
     "minimum_commission_rmb_per_fill": "5.00",
@@ -44,50 +48,61 @@
     "buyback_only_previously_sold_mobile_shares": true,
     "sell_batch_count": 4,
     "sell_batch_fraction_of_mobile": "0.25",
-    "share_rounding_and_lot_size": null
+    "share_rounding_and_lot_size": "private_mobile_shares_divisible_by_four_and_each_batch_valid_A_share_sell_lot_else_reject_before_run"
   },
   "states": {
     "A": {
       "box_low_raw_rmb": "2.64",
       "box_high_raw_rmb": "3.00",
       "flat_ma_definition": null,
-      "action": "observe_mechanical_T_only_after_all_gates_resolved"
+      "action": "observe_mechanical_T_only_after_all_gates_resolved",
+      "definition_candidates": "docs/backtest/Q07_CANDIDATE_DEFINITIONS.md"
     },
     "B": {
       "weekly_close_above_raw_rmb": "3.00",
       "ma20_above_ma60": true,
       "volume_to_20_day_mean_approx": "1.3",
       "volume_comparison_definition": null,
-      "action": "pause_new_sells"
+      "action": "pause_new_sells",
+      "weekly_condition_latch": "confirmed_weekly_condition_until_next_completed_weekly_confirmation",
+      "daily_execution_gate": "MA20_above_MA60_and_selected_B_volume_definition_required_each_sell_day",
+      "definition_candidates": "docs/backtest/Q07_CANDIDATE_DEFINITIONS.md"
     },
     "C": {
       "daily_close_below_raw_rmb": "2.64",
       "weak_ma_or_high_volume": true,
       "weak_ma_definition": null,
       "high_volume_definition": null,
-      "release_definition": null,
-      "action": "pause_buybacks"
+      "release_definition": "daily_raw_close_above_2_64_and_weak_MA_false_and_high_volume_false",
+      "action": "cancel_pending_buybacks_and_pause_buybacks_until_release_then_recalculate_without_auto_buy",
+      "definition_candidates": "docs/backtest/Q07_CANDIDATE_DEFINITIONS.md"
     },
     "D": {
       "weekly_close_below_stop_raw_rmb": "2.40",
       "weekly_close_below_review_raw_rmb": "2.30",
       "consecutive_weeks_below_review": 2,
       "review_logical_operator": "OR",
-      "release_definition": null,
+      "stop_transition": "first_weekly_cross_from_at_or_above_2_40_to_below_2_40_then_persist_while_below",
+      "review_trigger": "first_weekly_cross_from_at_or_above_2_30_to_below_2_30_OR_two_consecutive_weekly_closes_below_2_30",
+      "release_definition": "confirmed_weekly_raw_close_at_or_above_2_40_and_no_unresolved_invalidation_review_risk_then_reevaluate_without_restoring_orders",
       "action": "stop_regular_T_and_review_at_review_threshold"
     },
-    "priority_candidate": ["D", "C", "B", "A", "NO_ACTION"],
-    "priority_approval": null,
+    "priority": ["D", "C", "B", "A", "NO_ACTION"],
+    "pause_actions_combine": true,
     "unclassified_action": "NO_ACTION"
   },
   "orders": {
-    "sell_bands_raw_rmb_inclusive": [["2.98", "3.03"], ["3.08", "3.12"], null, null],
+    "sell_bands_raw_rmb_inclusive": [["2.64", "3.00"], ["2.64", "3.00"], null, null],
+    "sell_band_interpretation": "approved_close_execution_scope_for_first_two_batches_not_distinct_trigger_levels",
+    "sell_band_original_source_only": [["2.98", "3.03"], ["3.08", "3.12"]],
+    "sell_bands_three_four_null_reason": "freeze_after_development_backtest",
     "buyback_bands_raw_rmb_inclusive": [["2.76", "2.82"], ["2.62", "2.68"]],
-    "buyback_band_to_sold_batch_mapping": null,
-    "band_trigger_and_fill_policy": null,
-    "pause_B_pending_sell_order_policy": null,
+    "buyback_band_to_sold_batch_mapping": "FIFO_per_share_sold_to_rebought_ledger",
+    "band_trigger_and_fill_policy": "close_in_band_signal_next_session_open_if_open_still_in_band_and_all_gates_pass",
+    "pause_B_pending_sell_order_policy": "cancel_all_unfilled_sell_orders_partial_fills_count_actual_quantity",
     "max_unreplenished_fraction_before_sell_stop": "0.5",
-    "sell_cap_check_timing": null,
+    "sell_cap_check_timing": "before_each_new_sell_fill_reject_if_resulting_unreplenished_exceeds_half_initial_mobile_shares",
+    "low_buyback_band_when_C_false": "allowed_subject_to_all_other_gates",
     "below_2_64_high_volume_catch_falling_knife": false,
     "only_one_direction_per_day": true
   },
@@ -98,8 +113,10 @@
     "expected_buy_price_includes_scenario_slippage": true,
     "dividends_excluded_from_T_gate": true,
     "minimum_net_threshold": null,
-    "expected_buy_quote_estimator": null,
-    "threshold_unit": null,
+    "expected_buy_quote_estimator": "visible_quote_at_order_submission_no_ex_post_daily_low",
+    "paid_sell_fee_allocation": "pro_rata_by_shares_within_each_realized_sell_fill_no_recalculated_minimum_commission",
+    "threshold_unit": "RMB_per_share_approved_by_qi_delegation_to_Aqi_pending_commander_final_review",
+    "minimum_net_threshold_null_reason": "numeric_value_to_be_selected_in_stage2b_development_and_locked_before_stage3_OOS",
     "candidate_generation": "compare_pre_registered_candidates_on_development_only_then_lock_before_OOS",
     "out_of_sample_tuning_allowed": false
   },
@@ -110,7 +127,10 @@
     "reconciliation": "sold_quantity_equals_rebought_plus_open_plus_review_quantity",
     "success_category": "REBOUGHT_ONLY_IF_NET_GATE_MET",
     "open_unreplenished_success": false,
-    "unrealized_mark_to_market_separate": true
+    "unrealized_mark_to_market_separate": true,
+    "realized_T_net_and_received_dividend_cash_separate": true,
+    "open_sell_leg_missed_dividend_memo": true,
+    "dividend_adjustment_double_count_allowed": false
   },
   "warmup_proposal": {
     "daily_ma20_sessions": 20,
@@ -125,7 +145,15 @@
     "development_sessions": 485,
     "full_signal_sessions_in_development": 425,
     "earliest_execution_through_dev_sessions": 424,
-    "approval": null
+    "approval": "approved_base_61_sessions_recalculate_if_Q07_requires_longer_history",
+    "recalculation": "first_signal_date=max(date_of_session_61,date_of_all_Q07_daily_window_completion,date_of_required_completed_weekly_confirmation);first_execution=next_actual_trading_session",
+    "base_dates_are_theoretical_until_Q07_selected": true
   },
-  "blocking_question_ids": ["Q01", "Q02", "Q03", "Q04", "Q05", "Q06", "Q07", "Q08", "Q09", "Q10", "Q11", "Q12", "Q13", "Q14"]
+  "blocking_question_ids": ["Q01", "Q07", "Q09", "Q14"],
+  "unresolved_fields": {
+    "Q01": ["orders.sell_bands_raw_rmb_inclusive[2]", "orders.sell_bands_raw_rmb_inclusive[3]"],
+    "Q07": ["states.A.flat_ma_definition", "states.B.volume_comparison_definition", "states.C.weak_ma_definition", "states.C.high_volume_definition"],
+    "Q14": ["net_gate.minimum_net_threshold"],
+    "Q09": ["execution.fill_model_commander_confirmation"]
+  }
 }
