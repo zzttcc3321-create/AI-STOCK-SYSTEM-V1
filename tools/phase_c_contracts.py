@@ -11,7 +11,7 @@ import re
 import sqlite3
 
 from tools.phase_c_safety import (
-    integer, money, read_csv, require, valid_date, verify_create_sha256,
+    GateError, integer, money, read_csv, require, valid_date, verify_create_sha256,
 )
 
 
@@ -20,6 +20,31 @@ SECURITY_COLUMNS = (
     "list_date", "status",
 )
 HOLDING_COLUMNS = ("market", "symbol", "quantity", "avg_cost")
+# 015 prices and dashboard totals are in yuan; no FX conversion is defined.
+SUPPORTED_CURRENCIES = frozenset({"CNY"})
+
+
+class CurrencyValidationError(GateError):
+    """A fixed error code plus value-free, reproducible record coordinates."""
+
+    def __init__(self, record_scope, record_number, source_sha256):
+        super().__init__("INVALID_CURRENCY")
+        self.context = {
+            "field": "currency",
+            "record_scope": record_scope,
+            # One-based logical record number; a CSV header is not a record.
+            "record_number": record_number,
+        }
+        if source_sha256 is not None:
+            self.context["source_sha256"] = source_sha256
+
+
+def _currency(value, *, record_scope, record_number, source_sha256=None):
+    if value not in SUPPORTED_CURRENCIES:
+        raise CurrencyValidationError(record_scope, record_number, source_sha256)
+    return value
+
+
 AUTH_BY_STEP = {
     "015-04": "SECURITY_MASTER_IMPORT=YES",
     "015-05": "HOLDING_CONFIG_WRITE=YES",
@@ -254,7 +279,7 @@ def prepare(step, args):
     columns = SECURITY_COLUMNS if step == "015-04" else HOLDING_COLUMNS
     source, source_sha256 = read_csv(args.source, columns)
     rows = []
-    for record in source:
+    for record_number, record in enumerate(source, start=1):
         market, symbol = _text(record["market"]), _text(record["symbol"])
         if step == "015-04":
             require(market in {"SSE", "SZSE", "BSE"}, "INVALID_MARKET")
@@ -265,7 +290,9 @@ def prepare(step, args):
             rows.append((
                 market, symbol, _text(record["name"]), record["security_type"],
                 integer(record["lot_size"], minimum=1),
-                _text(record["currency"] or "CNY"),
+                _currency(record["currency"] or "CNY",
+                          record_scope="SECURITY_SOURCE", record_number=record_number,
+                          source_sha256=source_sha256),
                 valid_date(record["list_date"]) if record["list_date"] else None,
                 record["status"],
             ))
@@ -280,6 +307,10 @@ def prepare(step, args):
 
 
 def _security(db, prepared):
+    # Recheck at the fact-table boundary, including callers of execute().
+    for record_number, row in enumerate(prepared["rows"], start=1):
+        _currency(row[5], record_scope="SECURITY_PREPARED", record_number=record_number,
+                  source_sha256=prepared["source_sha256"])
     # The canonical CREATE has no IF NOT EXISTS; preserve validated repeats.
     created = 0
     if db.execute("SELECT 1 FROM sqlite_master WHERE name = ?",
@@ -332,13 +363,15 @@ def _valid_metadata(meta):
 
 def _holding(db, prepared):
     _schema(db, "security_master")
-    for row in prepared["rows"]:
+    for record_number, row in enumerate(prepared["rows"], start=1):
         security = db.execute(
-            "SELECT status FROM security_master WHERE market = ? AND symbol = ?",
+            "SELECT status, currency FROM security_master WHERE market = ? AND symbol = ?",
             row[:2],
         ).fetchone()
         require(security is not None, "HOLDING_SECURITY_MISSING")
         require(security[0] != "DELISTED", "HOLDING_SECURITY_DELISTED")
+        _currency(security[1], record_scope="HOLDING_PREPARED", record_number=record_number,
+                  source_sha256=prepared["source_sha256"])
     created = _create(db, "015-05")
     current = [tuple(row) for row in db.execute(
         "SELECT market, symbol, quantity, avg_cost FROM holding_config "
@@ -422,24 +455,17 @@ def _dashboard(db):
     batch_id = "B" + as_of_date.replace("-", "") + "_" + meta["source_sha256"][:12]
     holding_count = db.execute("SELECT COUNT(*) FROM holding_config").fetchone()[0]
     joined = db.execute(
-        "SELECT h.market, h.symbol, s.name, h.quantity, h.avg_cost "
+        "SELECT h.market, h.symbol, s.name, h.quantity, h.avg_cost, s.currency "
         "FROM holding_config AS h INNER JOIN security_master AS s "
         "ON h.market = s.market AND h.symbol = s.symbol ORDER BY h.market, h.symbol"
     ).fetchall()
     require(len(joined) == holding_count, "DASHBOARD_SECURITY_MISSING")
-    created = _create(db, "015-06")
-    exists = db.execute("SELECT 1 FROM dashboard_overview WHERE batch_id = ?",
-                        (batch_id,)).fetchone()
-    if exists:
-        _verify_batch(db, batch_id)
-        return {
-            "status": "APPLIED" if created else "IDEMPOTENT_NOOP",
-            "row_count": holding_count, "changed": 0,
-            "as_of_date": as_of_date, "source_sha256": meta["source_sha256"],
-        }
     projected = []
     total_mills = 0
-    for market, symbol, name, quantity, avg_cost in joined:
+    for record_number, (market, symbol, name, quantity, avg_cost, currency) in enumerate(
+            joined, start=1):
+        _currency(currency, record_scope="DASHBOARD_PROJECTION", record_number=record_number,
+                  source_sha256=meta["source_sha256"])
         _text(market)
         _text(symbol)
         _text(name)
@@ -450,6 +476,22 @@ def _dashboard(db):
                           _real(cost_mills), as_of_date))
         total_mills += cost_mills
     total_cost = _real(total_mills)
+    created = _create(db, "015-06")
+    exists = db.execute("SELECT 1 FROM dashboard_overview WHERE batch_id = ?",
+                        (batch_id,)).fetchone()
+    if exists:
+        overview, observed = _verify_batch(db, batch_id)
+        # Metadata's date/version/source identity selects this batch. A
+        # self-consistent historical projection is not proof of current content.
+        require(overview[0] == as_of_date and overview[1] == holding_count
+                and _mills(overview[2]) == total_mills,
+                "DASHBOARD_EXISTING_METADATA_MISMATCH")
+        require(observed == projected, "DASHBOARD_EXISTING_PROJECTION_MISMATCH")
+        return {
+            "status": "APPLIED" if created else "IDEMPOTENT_NOOP",
+            "row_count": holding_count, "changed": 0,
+            "as_of_date": as_of_date, "source_sha256": meta["source_sha256"],
+        }
     require(db.execute(
         "SELECT COUNT(*) FROM dashboard_position_snapshot WHERE batch_id = ?",
         (batch_id,),
