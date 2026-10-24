@@ -22,3 +22,7 @@
 ## 复审结论
 
 总指挥 2026-10-24 裁决：`P0_RESTART=APPROVED_AFTER_ISOLATION_GATE`。事件按 `P0_OOS_ADJUSTMENT_FACTOR_READ_VIOLATION` 永久留档；隔离门禁通过后准许重启研究。未发现污染证据仅指首轮没有统计或交付物受到该读取影响，不表示未发生违规。
+
+## 关联事件
+
+2026-10-24 首次重启后再次违规：P0_OOS_HISTORICAL_REPORT_READ_VIOLATION_02，详见 P0_DATA_BOUNDARY_DEVIATION_02.md。首次事件的历史结论不改写；两次违规均须在 P0 最终报告的数据限制章节披露；两事件关闭状态分开管理。
