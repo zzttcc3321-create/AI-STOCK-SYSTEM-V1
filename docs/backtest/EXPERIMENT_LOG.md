@@ -20,3 +20,9 @@
 | V11-B-DEV-001 | V1.1-B 开发段隔离验证 | qi 六项 A 与 PR #56 修订设计；D0 主方案五层漏斗、FIFO、A7 离线风险回补及双层验收；四项单因素与 D1-N1/N2 研究敏感性 | 仅 `jlgs_dev_only.json`，SHA256 `10ba1560…c5b1`，485 日，2023-10-09 至 2025-09-30；截断加载；封存段零读取 | 预登记 SHA256 `c84e93b8…373d5b`；主值 3.00/5 日/0.010，三档滑点 0/0.01/0.02；D0 五组×三档，D1 两场景×三档；`ready_for_stage2b=false` | 2026-10-22 UTC 先打印预登记 SHA256，后实现。首轮报告 SHA256 `2554e42a…1040a06`，因审计列与周线公共能力校验补强后纠错重跑；最终固定代码/配置/输入后同矩阵连续 2 次报告 SHA256 均为 `fc60ca4a8a12cb4f8ac009c6b607f883b3668569861a1bb9929dfac3c39568ca`；21 组、103 完整周。专项 11 tests OK；全量回归 1205 tests OK（617.611 秒，墙钟 618.83 秒；既有 1194+新增 11）；V1.0/V1.1 静态校验 PASS；只读三 blob 均匹配设计稿 | `V1_1_B_PREREGISTRATION.md`、`V1_1_B_DEV_REPORT.md`；忽略目录 `V11B_RUN.log`、`V11B_FULL_TEST.log`、`V11B_FROM_MAIN.patch`、`PR_BODY_V11B.md` | `ENGINEERING_PASS + STRATEGY_FAIL`：D0 三档均零交易，常规完成腿 0、扣费净额 0、常规完成率 0、基准超额 0；不调主参数、不替换 D1、不开放正式门禁；待总指挥审查和 qi 决定。 |
 
 未来登记至少包含：试验编号、预先登记的开发段参数、因子版本、费用档、代码提交、开发段结果、锁定时间、样本外执行与审查结论。样本外结果不能用于改写既定口径。
+
+## 收口追加记录（2026-10-24）
+
+| 编号 | 阶段 | 内容 | 输入段 | 固定参数/版本 | 执行 | 结果位置 | 审查状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| V10-V11-CLOSEOUT-001 | V1.0 / V1.1 研究收口 | 归档双层验收、失败原因与冻结清单；正式补记总指挥 R1 于 2026-10-22 21:51 经对话渠道送达的 `PASS_WITH_LIMITATIONS` 裁决：`OOS_DATA_BOUNDARY_VIOLATION` 补审关闭，违规永久留档。历史条目“待总指挥补审关闭”为裁决前状态，不回改 | 仅既有仓库文档、Git 提交及哈希；无新增行情读取，样本外继续封存 | V1.0/V1.1 参数不变；`ready_for_stage2b=false`；D0 主方案决定策略结论，D1 仅敏感性 | DOCS_ONLY；复算合并提交、预登记/报告/隔离输入 SHA256 与三份 V1.0 blob；未新增回测或测试。PR #57 合并门禁首跑连接中断为 `INCONCLUSIVE`；阿七合并核对的重跑汇总为 `1205 passed, 2304 subtests passed in 710.52s` | `V1_0_V1_1_FINAL_CLOSEOUT.md`、`JLGS_STRATEGY_EXECUTIVE_SUMMARY.md`、`STRATEGY_RESEARCH_FREEZE_MANIFEST.md` | `ENGINEERING_PASS + STRATEGY_FAIL`；V1.1 `CLOSED_STRATEGY_FAIL`，`LIVE_STRATEGY_AUTHORIZATION = NO`；总指挥 R1 违规补审已关闭且永久留档，不表示策略批准 |
