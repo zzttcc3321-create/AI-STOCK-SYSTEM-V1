@@ -377,5 +377,10 @@ def main(step, argv=None):
         return 0
     except Exception as exc:
         code = str(exc) if isinstance(exc, GateError) and re.fullmatch('[A-Z0-9_]+', str(exc)) else 'VALIDATION_OR_WRITE_FAILED'
-        print(json.dumps({'step': step, 'result': 'FAIL', 'error': code}, sort_keys=True))
+        report = {'step': step, 'result': 'FAIL', 'error': code}
+        if isinstance(exc, contracts.CurrencyValidationError):
+            report['error_context'] = {
+                **exc.context, 'database_sha256': args.expected_db_sha256,
+            }
+        print(json.dumps(report, sort_keys=True))
         return 1
